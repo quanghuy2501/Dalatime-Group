@@ -43,7 +43,6 @@ services:
     # Intentionally dry-run/fail-closed. Add --production only after parity passes.
     startCommand: python3 -m automation.report_batch.runner_cli worker --interval-seconds 3600
     autoDeploy: true
-    maxShutdownDelaySeconds: 300
     disk:
       name: onicorn-report-state
       mountPath: /var/data/onicorn
