@@ -29,3 +29,6 @@ Database migration/import is intentionally separate and explicit: `npm run phase
 ## Dashboard authentication
 
 When `DASHBOARD_BASIC_USER` and `DASHBOARD_BASIC_PASS` are configured, the dashboard uses the branded `/login` page instead of browser-native Basic Auth. Set `AUTH_SESSION_SECRET` to a long random value (for example `openssl rand -hex 32`) to enable signed, `HttpOnly`, `SameSite=Lax` session cookies. Sessions expire after 8 hours and are not persistent by default. `POST /auth/logout` clears the cookie. Dashboard pages and `/api/*` remain protected; APIs return `401` while browser page requests redirect to `/login`. Keep the secret and password out of source control.
+Production batch go-live automation is documented in `docs/batch-go-live.md`. The
+Node web service, `/healthz`, `/readyz`, and token-scoped customer reports remain
+the serving path; the Python batch worker is dry-run and publish-disabled by default.

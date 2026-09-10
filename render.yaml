@@ -23,11 +23,47 @@ services:
         value: 1sIMJ0TTPEC_hu6OBuW8hSHRLbb0Ajcr8
       - key: INACTIVE_STAFF_IDS
         value: NV15,NV16
-      - key: SNAPSHOT_DIR
-        value: /var/data/snapshots
-      - key: LOCK_FILE
-        value: /var/data/onicorn-sync.lock
       - key: REPORT_PORTAL_CONFIG_FILE
         sync: false
       - key: REPORT_PORTAL_LINKS_FILE
+        sync: false
+      - key: AUTH_SESSION_SECRET
+        generateValue: true
+      - key: DASHBOARD_BASIC_USER
+        sync: false
+      - key: DASHBOARD_BASIC_PASS
+        sync: false
+
+  - type: worker
+    name: Dalatime-Group-report-batch
+    runtime: python
+    region: singapore
+    plan: 0.5c-512mb
+    buildCommand: python3 -m compileall -q automation
+    # Intentionally dry-run/fail-closed. Add --production only after parity passes.
+    startCommand: python3 -m automation.report_batch.runner_cli worker --interval-seconds 3600
+    autoDeploy: true
+    maxShutdownDelaySeconds: 300
+    disk:
+      name: onicorn-report-state
+      mountPath: /var/data/onicorn
+      sizeGB: 1
+    envVars:
+      - key: ONICORN_ENV
+        value: production
+      - key: SNAPSHOT_DIR
+        value: /var/data/onicorn
+      - key: ONICORN_LOCK_FILE
+        value: /var/data/onicorn/run.lock
+      - key: MASTER_SNAPSHOT_PATH
+        value: /var/data/onicorn/input/master.json
+      - key: REPORT_SNAPSHOT_PATH
+        value: /var/data/onicorn/input/report.json
+      - key: WORKER_INTERVAL_SECONDS
+        value: "3600"
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_VERIFY_SELECT
+        value: SELECT 1
+      - key: FAILURE_NOTIFY_URL
         sync: false
