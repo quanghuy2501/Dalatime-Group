@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: Dalatime-Group
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm ci
+    startCommand: node src/server.mjs
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: EMPLOYEE_FOLDER_ID
+        value: 1sIMJ0TTPEC_hu6OBuW8hSHRLbb0Ajcr8
+      - key: INACTIVE_STAFF_IDS
+        value: NV15,NV16
+      - key: SNAPSHOT_DIR
+        value: /var/data/snapshots
+      - key: LOCK_FILE
+        value: /var/data/onicorn-sync.lock
+      - key: REPORT_PORTAL_CONFIG_FILE
+        sync: false
+      - key: REPORT_PORTAL_LINKS_FILE
+        sync: false
