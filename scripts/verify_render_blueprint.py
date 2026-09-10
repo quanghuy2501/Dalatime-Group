@@ -29,22 +29,22 @@ def verify(blueprint: dict) -> None:
     if len(names) != len(set(names)):
         raise ValueError("service names must be unique")
     web = next((service for service in services if service.get("type") == "web"), None)
-    worker = next((service for service in services if service.get("type") == "worker"), None)
+    automation = next((service for service in services if service.get("type") in {"worker", "cron"}), None)
     if not web or web.get("healthCheckPath") != "/healthz":
         raise ValueError("web service must preserve /healthz")
-    if not worker:
-        raise ValueError("a background worker is required")
-    command = str(worker.get("startCommand", ""))
-    if "runner_cli" not in command or " worker" not in command:
-        raise ValueError("worker must use the batch runner")
+    if not automation:
+        raise ValueError("a worker or cron automation service is required")
+    command = str(automation.get("startCommand", ""))
+    if "runner_cli" not in command or not any(word in command for word in (" sync", " worker")):
+        raise ValueError("automation must use the batch runner")
     if "--production" in command:
-        raise ValueError("Blueprint worker must default to dry-run; production is explicit")
-    env = {item.get("key"): item for item in worker.get("envVars", [])}
+        raise ValueError("Blueprint automation must default to dry-run; production is explicit")
+    env = {item.get("key"): item for item in automation.get("envVars", [])}
     for key in ("SNAPSHOT_DIR", "ONICORN_LOCK_FILE", "MASTER_SNAPSHOT_PATH", "REPORT_SNAPSHOT_PATH"):
         if key not in env:
-            raise ValueError(f"worker env is missing {key}")
-    if not worker.get("disk"):
-        raise ValueError("worker requires durable state disk")
+            raise ValueError(f"automation env is missing {key}")
+    if automation.get("type") == "worker" and not automation.get("disk"):
+        raise ValueError("persistent worker requires durable state disk")
 
 
 def main() -> int:
