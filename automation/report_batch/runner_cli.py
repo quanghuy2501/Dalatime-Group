@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Production CLI. No command writes Google or rotates credentials."""
-import argparse, json, os, time
+import argparse, json, os, time, subprocess, tempfile
 from pathlib import Path
 from .config import Settings
 from .runner import go_live_checks, production_run, rollback
+from .storage import SupabaseStorage
 
 def env_path(name: str) -> Path:
     value=os.getenv(name,"").strip()
@@ -13,7 +14,30 @@ def env_path(name: str) -> Path:
 def execute_from_env(production: bool) -> dict:
     if not production: return dry_run_from_env()
     state=Path(os.getenv("SNAPSHOT_DIR",".runtime"))
-    return production_run(env_path("MASTER_SNAPSHOT_PATH"),state,env_path("REPORT_SNAPSHOT_PATH"),production=True,db_select=os.getenv("DB_VERIFY_SELECT") or None)
+    # Scheduled runs create a fresh read-only Google snapshot in ephemeral storage.
+    # An explicit MASTER_SNAPSHOT_PATH remains supported for controlled replays.
+    explicit=os.getenv('MASTER_SNAPSHOT_PATH','').strip()
+    with tempfile.TemporaryDirectory(prefix='onicorn-cron-') as temp:
+        master=Path(explicit) if explicit else Path(temp)/'master-snapshot.json'
+        if not explicit:
+            exporter=Path(__file__).resolve().parents[2]/'scripts'/'master_snapshot.py'
+            credentials=os.getenv('GOOGLE_APPLICATION_CREDENTIALS','').strip()
+            if not credentials: raise RuntimeError('GOOGLE_APPLICATION_CREDENTIALS is required for scheduled live snapshot')
+            cmd=['python3',str(exporter),'snapshot','--live','--output',str(master)]
+            subprocess.run(cmd,check=True,capture_output=True,text=True)
+        report_value=os.getenv('REPORT_SNAPSHOT_PATH','').strip()
+        if report_value: report=Path(report_value)
+        else:
+            report=Path(temp)/'report.json'; report.write_text(json.dumps({'rows':[]})+'\n')
+        result=production_run(master,state,report,production=True,db_select=os.getenv('DB_VERIFY_SELECT') or None)
+        # Upload only after all local validation gates pass. Objects are immutable.
+        storage=SupabaseStorage(); run_id=result['run_id']; prefix=f"runs/{run_id}"
+        uploaded=storage.upload_file(f'{prefix}/master-snapshot.json',master)
+        manifest={**result['manifest'],'storage':uploaded}
+        storage.upload_json('published.json',manifest)
+        storage.upload_json('last-known-good.json',manifest)
+        result['storage']=uploaded
+        return result
 
 def dry_run_from_env() -> dict:
     """Validate configured inputs without writing state or publishing."""

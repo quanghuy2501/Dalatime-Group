@@ -32,3 +32,13 @@ When `DASHBOARD_BASIC_USER` and `DASHBOARD_BASIC_PASS` are configured, the dashb
 Production batch go-live automation is documented in `docs/batch-go-live.md`. The
 Node web service, `/healthz`, `/readyz`, and token-scoped customer reports remain
 the serving path; the Python batch worker is dry-run and publish-disabled by default.
+
+## Production cron snapshot publication
+
+The Render cron is deliberately dry-run by default. It creates no Google writes and does not publish. After parity is proven, explicitly set its command to:
+
+```sh
+python3 -m automation.report_batch.runner_cli scheduled-run --production
+```
+
+Production creates `scripts/master_snapshot.py --live` in `/tmp`, validates a complete locked snapshot, runs reconciliation, then uploads immutable `runs/<run-id>/master-snapshot.json`, `published.json`, and `last-known-good.json` to the private Supabase Storage bucket. Configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Render secret, never commit), `SNAPSHOT_BUCKET`, `GOOGLE_APPLICATION_CREDENTIALS`, `MASTER_SPREADSHEET_ID`, `DATABASE_URL`, and `REPORT_SNAPSHOT_PATH`. Optional `FAILURE_NOTIFY_URL` receives redacted failure alerts. Create the private bucket and service-role-only Storage policies once in Supabase. Missing credentials, incomplete/429 snapshots, lock conflicts, or parity mismatches fail closed and preserve the prior LKG.

@@ -41,7 +41,8 @@ services:
     region: singapore
     schedule: "0 6 * * *"
     buildCommand: python3 -m compileall -q automation
-    # Dry-run/fail-closed until parity is proven; add --production explicitly later.
+    # Safe dry-run by default. Enable production only after parity approval:
+    # startCommand: python3 -m automation.report_batch.runner_cli scheduled-run --production
     startCommand: python3 -m automation.report_batch.runner_cli scheduled-run
     envVars:
       - key: ONICORN_ENV
@@ -58,5 +59,15 @@ services:
         sync: false
       - key: DB_VERIFY_SELECT
         value: SELECT 1
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SNAPSHOT_BUCKET
+        value: onicorn-snapshots
       - key: FAILURE_NOTIFY_URL
         sync: false
