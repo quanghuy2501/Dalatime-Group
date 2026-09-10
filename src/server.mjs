@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { connectDb } from './db/postgres.mjs';
-import { authMiddleware } from './auth.mjs';
+import { authMiddleware, credentialsMatch, createSessionCookie, clearSessionCookie } from './auth.mjs';
 import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHealth, getTimeseries, getIssues, getIssueTypes, getMasters, getAlerts, getHeatmap } from './db/queries.mjs';
 import { loadReportCustomers } from './report/config.mjs';
 import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
@@ -48,6 +48,15 @@ const appWithDb = async fn => {
 };
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.get('/login', (req, res) => res.sendFile(path.join(publicDir, 'login.html')));
+app.post('/auth/login', (req, res) => {
+  if (!process.env.AUTH_SESSION_SECRET) return res.status(503).json({ ok: false, error: 'AUTH_SESSION_SECRET is not configured' });
+  if (!credentialsMatch(String(req.body.username || ''), String(req.body.password || ''))) return res.status(401).json({ ok: false, error: 'Tên đăng nhập hoặc mật khẩu không đúng' });
+  res.setHeader('Set-Cookie', createSessionCookie());
+  res.json({ ok: true, redirect: '/' });
+});
+app.post('/auth/logout', (req, res) => { res.setHeader('Set-Cookie', clearSessionCookie()); res.json({ ok: true }); });
 app.use(authMiddleware);
 app.use('/report', createReportRouter({ customers: reportCustomers, withDb: appWithDb, publicDir }));
 app.use('/api/report', createReportApiRouter({ customers: reportCustomers, withDb: appWithDb }));
