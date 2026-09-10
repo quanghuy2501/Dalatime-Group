@@ -34,32 +34,26 @@ services:
       - key: DASHBOARD_BASIC_PASS
         sync: false
 
-  - type: worker
+  # Scheduled, pay-per-run automation. No always-on worker or persistent disk.
+  - type: cron
     name: Dalatime-Group-report-batch
     runtime: python
     region: singapore
-    plan: 0.5c-512mb
+    schedule: "0 6 * * *"
     buildCommand: python3 -m compileall -q automation
-    # Intentionally dry-run/fail-closed. Add --production only after parity passes.
-    startCommand: python3 -m automation.report_batch.runner_cli worker --interval-seconds 3600
-    autoDeploy: true
-    disk:
-      name: onicorn-report-state
-      mountPath: /var/data/onicorn
-      sizeGB: 1
+    # Dry-run/fail-closed until parity is proven; add --production explicitly later.
+    startCommand: python3 -m automation.report_batch.runner_cli sync
     envVars:
       - key: ONICORN_ENV
         value: production
       - key: SNAPSHOT_DIR
-        value: /var/data/onicorn
+        value: /tmp/onicorn-report-state
       - key: ONICORN_LOCK_FILE
-        value: /var/data/onicorn/run.lock
+        value: /tmp/onicorn-report-state/run.lock
       - key: MASTER_SNAPSHOT_PATH
-        value: /var/data/onicorn/input/master.json
+        sync: false
       - key: REPORT_SNAPSHOT_PATH
-        value: /var/data/onicorn/input/report.json
-      - key: WORKER_INTERVAL_SECONDS
-        value: "3600"
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: DB_VERIFY_SELECT
