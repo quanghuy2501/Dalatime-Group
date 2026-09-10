@@ -11,7 +11,7 @@ def env_path(name: str) -> Path:
     return Path(value)
 
 def execute_from_env(production: bool) -> dict:
-    if not production: raise RuntimeError("scheduled worker requires explicit --production")
+    if not production: return dry_run_from_env()
     state=Path(os.getenv("SNAPSHOT_DIR",".runtime"))
     return production_run(env_path("MASTER_SNAPSHOT_PATH"),state,env_path("REPORT_SNAPSHOT_PATH"),production=True,db_select=os.getenv("DB_VERIFY_SELECT") or None)
 

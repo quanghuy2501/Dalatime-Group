@@ -42,7 +42,7 @@ services:
     schedule: "0 6 * * *"
     buildCommand: python3 -m compileall -q automation
     # Dry-run/fail-closed until parity is proven; add --production explicitly later.
-    startCommand: python3 -m automation.report_batch.runner_cli sync
+    startCommand: python3 -m automation.report_batch.runner_cli scheduled-run
     envVars:
       - key: ONICORN_ENV
         value: production

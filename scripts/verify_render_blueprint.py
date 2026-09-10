@@ -35,7 +35,7 @@ def verify(blueprint: dict) -> None:
     if not automation:
         raise ValueError("a worker or cron automation service is required")
     command = str(automation.get("startCommand", ""))
-    if "runner_cli" not in command or not any(word in command for word in (" sync", " worker")):
+    if "runner_cli" not in command or not any(word in command for word in (" sync", " worker", " scheduled-run")):
         raise ValueError("automation must use the batch runner")
     if "--production" in command:
         raise ValueError("Blueprint automation must default to dry-run; production is explicit")
