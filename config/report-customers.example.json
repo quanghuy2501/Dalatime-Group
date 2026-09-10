@@ -1,0 +1,8 @@
+{
+  "customers": [
+    {
+      "tokenHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "clientCode": "CUSTOMER_CODE_FROM_CLIENTS_TABLE"
+    }
+  ]
+}

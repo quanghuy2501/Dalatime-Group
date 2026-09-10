@@ -1,0 +1,15 @@
+import fs from 'fs';
+import { connectDb } from '../src/db/postgres.mjs';
+const db=await connectDb();
+const out={generatedAt:new Date().toISOString()};
+out.overview=(await db.query('select * from v_dashboard_overview')).rows[0];
+out.topBrands=(await db.query('select * from v_brand_performance order by view desc limit 10')).rows;
+out.topStaff=(await db.query('select * from v_staff_performance order by view desc limit 10')).rows;
+out.topChannels=(await db.query('select * from v_channel_performance order by view desc limit 10')).rows;
+out.quality=(await db.query('select * from v_quality_summary order by count desc')).rows;
+fs.mkdirSync('reports/phase2',{recursive:true});
+fs.writeFileSync('reports/phase2/dashboard-query-smoke.json', JSON.stringify(out,null,2));
+const md=['# Phase 2 Dashboard Query Smoke','',`Generated: ${out.generatedAt}`,'','## Overview',...Object.entries(out.overview).map(([k,v])=>`- ${k}: ${v}`),'','## Top brands',...out.topBrands.map(r=>`- ${r.brand_name}: ${Number(r.view).toLocaleString('vi-VN')} views / ${r.posts} posts`),'','## Top staff',...out.topStaff.map(r=>`- ${r.staff_name}: ${Number(r.view).toLocaleString('vi-VN')} views / ${r.posts} posts / bonus ${Number(r.bonus_amount||0).toLocaleString('vi-VN')}đ`),'','## Quality',...out.quality.map(r=>`- ${r.severity}/${r.issue_type}: ${r.count}`)];
+fs.writeFileSync('reports/phase2/dashboard-query-smoke.md', md.join('\n'));
+console.log(JSON.stringify(out.overview,null,2));
+await db.end();

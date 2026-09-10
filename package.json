@@ -1,0 +1,29 @@
+{
+  "name": "onicorn-dashboard-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audit:local": "node scripts/audit-local-csv.mjs",
+    "import:local": "node scripts/import-local-csv.mjs",
+    "check": "python3 -m py_compile scripts/master_snapshot.py && node --check scripts/audit-local-csv.mjs && node --check scripts/import-local-csv.mjs && node --check src/server.mjs && node --check src/auth.mjs && node --check src/report/config.mjs && node --check src/report/queries.mjs && node --check src/report/routes.mjs && node --check src/importers/liveMaster.mjs && node --check scripts/phase1-import-master-to-db.mjs && node --check scripts/run-readonly-sync-cycle.mjs",
+    "test": "node --test",
+    "portal:token": "node scripts/generate-report-token.mjs",
+    "portal:activate-active": "node scripts/activate-report-tokens.mjs",
+    "live:audit": "node scripts/live-audit-rate-limited.mjs",
+    "phase1:dry-run": "node scripts/phase1-import-master-to-db.mjs --dry-run",
+    "phase1:import": "node scripts/phase1-import-master-to-db.mjs --migrate",
+    "api": "node src/server.mjs",
+    "api:smoke": "node scripts/api-smoke.mjs",
+    "sync:readonly": "node scripts/run-readonly-sync-cycle.mjs",
+    "phase3:verify-staging": "node --env-file=.env.local scripts/phase3-verify-staging.mjs",
+    "phase3:diff": "node --env-file=.env.local scripts/phase3-diff-staging-vs-production.mjs",
+    "phase3:production-approval-check": "node scripts/phase3-production-write-guard.mjs",
+    "phase4:export": "node --env-file=.env.local scripts/phase4-export-master.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pg": "latest"
+  }
+}

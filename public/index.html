@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Dalat Time</title>
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <div class="shell"><div class="app">
+    <aside class="side">
+      <div class="brand-mark"><span class="brand-glyph">D</span><span>Dalat Time</span></div>
+      <nav class="nav" id="nav" aria-label="Điều hướng dashboard"></nav>
+      <div class="side-status" id="sideStatus"><span class="status-dot" id="statusDot"></span><span id="statusText">Đang kết nối…</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow">BÁO CÁO VẬN HÀNH</p><h1 id="title">Tổng quan</h1><p id="meta">Đang tải dữ liệu…</p></div>
+        <div class="actions no-print"><button class="button secondary" id="exportBtn">Tải CSV</button><button class="button secondary" id="printBtn">In báo cáo</button><button class="button primary" id="refreshBtn">Làm mới</button></div>
+      </header>
+      <section id="content" class="loading" aria-live="polite"><span class="spinner"></span>Đang tải dashboard…</section>
+    </main>
+  </div></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/dashboard.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+import fs from 'fs';
+import path from 'path';
+import { readCsv, nonEmptyRows } from '../src/utils/csv.mjs';
+import { findHeader } from '../src/importers/masterCsv.mjs';
+const root = '/Users/quanghuy/Projects/tui-mo-dashboard';
+const outDir = path.join(process.cwd(), 'reports', 'local-audit');
+fs.mkdirSync(outDir, { recursive: true });
+const expected = ['NGÀY ĐĂNG BÀI','TÊN THƯƠNG HIỆU','VIEW','ID','MÃ KH','TIMESTAMP','Tên cấu hình'];
+const files = fs.readdirSync(root).filter(f => f.startsWith('extracted_') && f.endsWith('.csv')).sort();
+const sheets = files.map(f => {
+  const rows = readCsv(path.join(root, f));
+  const h = findHeader(rows, expected);
+  return { file:f, rows:rows.length, nonempty:nonEmptyRows(rows).length, colsMax:rows.reduce((m,r)=>Math.max(m,r.length),0), headerRow:h.index+1, header:h.row, dataRows:nonEmptyRows(rows.slice(h.index+1)).length };
+});
+const issues=[];
+const raw=sheets.find(s=>s.file==='extracted_RAW_DATA.csv');
+if(raw && raw.colsMax < 26) issues.push({severity:'warn', issue:'RAW_DATA snapshot has <26 columns', detail:`colsMax=${raw.colsMax}. Current source expects 26 incl viral_confirm_date.`});
+fs.writeFileSync(path.join(outDir,'audit.json'), JSON.stringify({generatedAt:new Date().toISOString(), sheets, issues}, null, 2));
+const md=['# Local CSV Audit','',...sheets.map(s=>`- ${s.file}: rows=${s.rows}, nonempty=${s.nonempty}, colsMax=${s.colsMax}, headerRow=${s.headerRow}, dataRows=${s.dataRows}`),'','## Issues','',...(issues.length?issues.map(i=>`- ${i.severity}: ${i.issue} - ${i.detail}`):['None'])];
+fs.writeFileSync(path.join(outDir,'audit.md'), md.join('\n'));
+console.log(path.join(outDir,'audit.md'));

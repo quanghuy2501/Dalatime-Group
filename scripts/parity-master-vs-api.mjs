@@ -1,0 +1,11 @@
+import fs from 'fs';
+import { loadLiveMasterSnapshot, mapPostRaw } from '../src/importers/liveMaster.mjs';
+import { connectDb } from '../src/db/postgres.mjs';
+import { getOverview } from '../src/db/queries.mjs';
+function inRange(p, from, to){return (!from || p.posted_date>=from) && (!to || p.posted_date<=to)}
+function agg(rows){const o={posts:0,view:0,like:0,comment:0,save:0,share:0,viral:0,exclusive:0}; for(const p of rows){o.posts++; o.view+=p.realtime_view||0; o.like+=p.realtime_like||0; o.comment+=p.realtime_comment||0; o.save+=p.realtime_save||0; o.share+=p.realtime_share||0; if(p.viral_label)o.viral++; if(p.is_exclusive)o.exclusive++;} o.interactions=o.like+o.comment+o.save+o.share; o.er=o.view?o.interactions/o.view*100:0; return o}
+const ranges=[{name:'all',from:'',to:''},{name:'sep_1_8',from:'2026-09-01',to:'2026-09-08'},{name:'august',from:'2026-08-01',to:'2026-08-31'}];
+const snap=await loadLiveMasterSnapshot(); const raw=snap.rawRows.map(mapPostRaw).filter(p=>p.posted_date||p.post_url||p.brand_text_raw||p.channel_name);
+const db=await connectDb(); const report={generatedAt:new Date().toISOString(), ranges:[]};
+for(const r of ranges){const master=agg(raw.filter(p=>inRange(p,r.from,r.to))); const api=await getOverview(db,{from:r.from,to:r.to}); for(const k of Object.keys(api)) if(!['er'].includes(k)) api[k]=Number(api[k]||0); api.er=Number(api.er||0); const diff={}; for(const k of ['posts','view','like','comment','save','share','viral','exclusive','interactions']) diff[k]=(api[k]||0)-(master[k]||0); diff.er=api.er-master.er; report.ranges.push({range:r,master,api,diff,pass:Object.values(diff).every(v=>Math.abs(v)<0.0001)});}
+await db.end(); fs.writeFileSync('reports/phase2/parity-master-vs-api.json',JSON.stringify(report,null,2)); const md=['# Parity Master RAW vs DB API Exact Mirror','',`Generated: ${report.generatedAt}`]; for(const x of report.ranges){md.push('',`## ${x.range.name} - ${x.pass?'PASS':'FAIL'}`,`- posts diff: ${x.diff.posts}`,`- view diff: ${x.diff.view}`,`- viral diff: ${x.diff.viral}`,`- ER diff: ${x.diff.er.toFixed(8)}%`)} fs.writeFileSync('reports/phase2/parity-master-vs-api.md',md.join('\n')); console.log(JSON.stringify(report.ranges.map(x=>({name:x.range.name,pass:x.pass,diff:x.diff})),null,2));
