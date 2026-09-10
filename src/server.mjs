@@ -30,8 +30,18 @@ function validRange(query) {
   return date(query.from) && date(query.to) && !(query.from && query.to && query.from > query.to);
 }
 
-export function createApp({ dbConnector = connectDb, reportCustomers = loadReportCustomers() } = {}) {
+export function createApp({ dbConnector = connectDb, reportCustomers } = {}) {
 const app = express();
+if (reportCustomers === undefined) {
+  try { reportCustomers = loadReportCustomers(); }
+  catch (error) { console.error(`Report config unavailable: ${error.message}`); reportCustomers = []; }
+}
+app.get('/healthz', (req, res) => res.json({ ok: true, service: 'onicorn-dashboard-system', readiness: 'process-live' }));
+app.get('/readyz', asyncRoute(async (req, res) => {
+  if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });
+  try { await appWithDb(async db => db.query('select 1')); res.json({ ok: true, ready: true }); }
+  catch { res.status(503).json({ ok: false, ready: false, reason: 'database unavailable' }); }
+}));
 const appWithDb = async fn => {
   const db = await dbConnector();
   try { return await fn(db); } finally { await db.end(); }
