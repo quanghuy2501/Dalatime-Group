@@ -91,18 +91,28 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
 
 app.get('/api/health', asyncRoute(async (req, res) => res.json(await appWithDb(db => getHealth(db, asInt(req.query.limit, 100))))));
 app.get('/api/dashboard', asyncRoute(async (req, res) => {
-  const data = await appWithDb(async db => ({
-    overview: await getOverview(db, req.query),
-    brands: await getTopBrands(db, 20, req.query),
-    staff: await getTopStaff(db, 20, req.query),
-    channels: await getTopChannels(db, 20, req.query),
-    health: await getHealth(db, 20),
-    timeseries: await getTimeseries(db, req.query),
-    alerts: await getAlerts(db),
-    masters: await getMasters(db),
-    heatmap: await getHeatmap(db, req.query)
-  }));
-  res.json(data);
+  const started = Date.now();
+  try {
+    // Keep one connection for the request, but issue independent read-only queries together.
+    // pg queues these safely on the same client and avoids repeated connection setup.
+    const data = await appWithDb(async db => {
+      const [overview, brands, staff, channels, health, timeseries, alerts, masters, heatmap] = await Promise.all([
+        getOverview(db, req.query), getTopBrands(db, 20, req.query), getTopStaff(db, 20, req.query),
+        getTopChannels(db, 20, req.query), getHealth(db, 20), getTimeseries(db, req.query),
+        getAlerts(db), getMasters(db), getHeatmap(db, req.query)
+      ]);
+      return { overview, brands, staff, channels, health, timeseries, alerts, masters, heatmap };
+    });
+    const elapsedMs = Date.now() - started;
+    // Bounded diagnostics only: no query text, credentials, or payload data.
+    if (elapsedMs > 2000) console.warn(`[dashboard] completed in ${elapsedMs}ms`);
+    res.set('Server-Timing', `dashboard;dur=${elapsedMs}`);
+    res.json(data);
+  } catch (error) {
+    const elapsedMs = Date.now() - started;
+    console.error(`[dashboard] failed after ${elapsedMs}ms: ${error?.message || 'unknown error'}`);
+    throw error;
+  }
 }));
 
 app.use((err, req, res, next) => {

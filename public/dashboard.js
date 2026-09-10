@@ -9,7 +9,9 @@ const isFuture = s => !!s && String(s).slice(0, 10) > todayStr();
 // Posted dates in the future indicate bad source data (crawler/date-parse bug), not a real KPI — flag, don't hide.
 const dateFlag = s => isFuture(s) ? ' <span class="pill warn" title="Ngày đăng nằm trong tương lai — dữ liệu nguồn cần kiểm tra">⚠ tương lai</span>' : '';
 
-const REQUEST_TIMEOUT = 8000;
+// Render may cold-start the service and establish a DB connection on the first request.
+// Keep the real error visible while allowing that bounded startup window.
+const REQUEST_TIMEOUT = 30000;
 const TAB_LABELS = { overview: '🏠 Tổng quan', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng' };
 const RANGE_PRESETS = [['7d', '7 ngày'], ['14d', '14 ngày'], ['30d', '30 ngày'], ['90d', '90 ngày'], ['all', 'Tất cả']];
 
