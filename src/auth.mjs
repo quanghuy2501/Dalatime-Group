@@ -21,7 +21,7 @@ export function credentialsMatch(username, password) {
   return Boolean(process.env.DASHBOARD_BASIC_USER && process.env.DASHBOARD_BASIC_PASS && username === process.env.DASHBOARD_BASIC_USER && password === process.env.DASHBOARD_BASIC_PASS);
 }
 export function authMiddleware(req, res, next) {
-  if (req.path.startsWith('/report/') || req.path.startsWith('/api/report/')) return next();
+  if (req.path === '/login' || req.path === '/login.css' || req.path === '/login.js' || req.path.startsWith('/report/') || req.path.startsWith('/api/report/')) return next();
   if (req.path === '/login' || req.path === '/auth/login' || req.path === '/auth/logout') return next();
   if (req.path === '/api/status') return next();
   if (process.env.NODE_ENV !== 'production' && !process.env.DASHBOARD_AUTH_TOKEN && !process.env.DASHBOARD_BASIC_USER) return next();
