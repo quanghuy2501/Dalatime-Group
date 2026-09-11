@@ -37,10 +37,10 @@ def verify(blueprint: dict) -> None:
     command = str(automation.get("startCommand", ""))
     if "runner_cli" not in command or not any(word in command for word in (" sync", " worker", " scheduled-run")):
         raise ValueError("automation must use the batch runner")
-    if "--production" in command:
-        raise ValueError("Blueprint automation must default to dry-run; production is explicit")
+    if automation.get("type") == "cron" and "scheduled-run --production" not in command:
+        raise ValueError("cron automation must explicitly run the gated production schedule")
     env = {item.get("key"): item for item in automation.get("envVars", [])}
-    for key in ("SNAPSHOT_DIR", "ONICORN_LOCK_FILE", "MASTER_SNAPSHOT_PATH", "REPORT_SNAPSHOT_PATH"):
+    for key in ("SNAPSHOT_DIR", "ONICORN_LOCK_FILE", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID"):
         if key not in env:
             raise ValueError(f"automation env is missing {key}")
     if automation.get("type") == "worker" and not automation.get("disk"):

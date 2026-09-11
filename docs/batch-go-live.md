@@ -17,8 +17,13 @@ must not publish until a same-watermark reconciliation passes.
 - `runner.py` stages atomically, validates parity, optionally runs one guarded
   read-only SQL `SELECT`, publishes manifests, records last-known-good state, and
   provides confirmation-gated rollback.
-- `runner_cli.py` is the worker/operator entry point. `worker` is dry-run by
-  default. Publication requires the literal `--production` flag.
+- `runner_cli.py` is the worker/operator entry point. A scheduled run without
+  `MASTER_SNAPSHOT_PATH` exports the Master to a private ephemeral `/tmp`
+  directory through `master_snapshot.py snapshot --live`. That client has only
+  Sheets read-only and Drive metadata read-only scopes. The export is required
+  to be complete, locked, read-only, and checksum-valid before it is adapted to
+  the batch envelope. When `REPORT_SNAPSHOT_PATH` is absent, the runner creates
+  a deterministic local rows projection from that validated envelope.
 - `health.py` retains standalone worker liveness/readiness support. Render uses the
   existing Node web `/healthz` and `/readyz`, so customer report routing is unchanged.
 
@@ -27,15 +32,20 @@ credentials, and `.env` files stay outside Git.
 
 ## Render Blueprint
 
-`render.yaml` declares the existing Node web service and a Python background worker
-with a persistent disk. The committed worker command intentionally omits
-`--production`; it only validates that the configured sealed Master and customer
-report snapshots are readable and always reports `publish_allowed: false`.
+`render.yaml` declares the existing Node web service and a daily Python cron. It
+runs `scheduled-run --production`; no `MASTER_SNAPSHOT_PATH` or
+`REPORT_SNAPSHOT_PATH` is required. Configure `GOOGLE_APPLICATION_CREDENTIALS`
+as the path to a Render secret file containing the service-account JSON, and set
+`DATABASE_URL`. Supabase upload is disabled when both its URL and service-role key
+are absent; if either is set, both and `SNAPSHOT_BUCKET` are required. The immutable
+Master object is uploaded only after snapshot/report validation and before local
+reconciliation/publication.
 
-Render cron jobs are not used because this batch needs a durable lock, checkpoints,
-published manifest, and last-known-good state on a persistent disk. Configure all
-`sync: false` values in the Render dashboard. Place the two read-only snapshots at
-the configured disk paths using an approved secure operational process.
+The only database command allowed by this path is the single statement in
+`DB_VERIFY_SELECT`; the guard rejects non-SELECT and multi-statement SQL. It never
+replaces database tables and never writes Google. A blocked run exits 2 with an
+exact JSON `reason`; validation/reconciliation failures leave the previous
+published and last-known-good manifests untouched.
 
 ## Verification and explicit production enablement
 
@@ -49,14 +59,7 @@ python3 -m automation.report_batch.runner_cli check \
   --report "$REPORT_SNAPSHOT_PATH" --db-select "$DB_VERIFY_SELECT"
 ```
 
-Only after the final command and same-watermark parity evidence pass may an operator
-change the Render worker start command to:
-
-```bash
-python3 -m automation.report_batch.runner_cli worker --production --interval-seconds 3600
-```
-
-Redeploy and confirm `/healthz`, `/readyz`, the customer report URLs, worker JSONL
+Redeploy and confirm `/healthz`, `/readyz`, the customer report URLs, cron JSONL
 events, `published.json`, and `last-known-good.json`. If a run blocks, leave the
 published manifest untouched; do not delete locks or repair data automatically.
 
