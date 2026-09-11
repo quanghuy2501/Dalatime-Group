@@ -10,6 +10,33 @@ from .storage import SupabaseStorage
 
 class ScheduledRunBlocked(RuntimeError): pass
 
+
+def _diagnostic(master=None, report=None, reason='', error_type='ScheduledRunBlocked'):
+    """Build a redacted, deterministic blocker payload without touching DB/Google."""
+    master_value = master if isinstance(master, dict) else {}
+    metadata = master_value.get('metadata') or {}
+    files = master_value.get('files') or []
+    master_count = sum(len(item.get('rows', [])) for item in files if isinstance(item, dict))
+    report_value = report if isinstance(report, dict) else {}
+    report_count = len(report_value.get('rows', [])) if isinstance(report_value.get('rows'), list) else 0
+    db_count = 0
+    db_path = os.getenv('DB_SNAPSHOT_PATH', '').strip()
+    if db_path:
+        try:
+            db_value = load(Path(db_path), {})
+            db_count = len(db_value.get('rows', [])) if isinstance(db_value, dict) and isinstance(db_value.get('rows'), list) else 0
+        except (OSError, ValueError, TypeError):
+            db_count = 0
+    return {
+        'status': 'blocked', 'publish_allowed': False, 'run_id': metadata.get('run_id') or master_value.get('run_id'),
+        'watermark': metadata.get('watermark') or master_value.get('watermark'),
+        'fingerprint': metadata.get('fingerprint') or master_value.get('fingerprint'),
+        'counts': {'master': master_count, 'db': db_count, 'report': report_count},
+        'missing_count': max(master_count - db_count, 0), 'extra_count': max(db_count - master_count, 0),
+        'report_path': str(report.get('path')) if isinstance(report, dict) and report.get('path') else os.getenv('REPORT_SNAPSHOT_PATH') or None,
+        'reason': reason, 'error_type': error_type,
+    }
+
 def env_path(name):
     value=os.getenv(name,'').strip()
     if not value: raise ScheduledRunBlocked(f'{name} is required')
@@ -100,10 +127,15 @@ def execute_from_env(production):
             result=production_run(master,Path(os.getenv('SNAPSHOT_DIR','.runtime')),report,True,db_select=os.getenv('DB_VERIFY_SELECT') or None)
             if uploaded: result['storage']=uploaded
             return result
-    except ScheduledRunBlocked:
+    except ScheduledRunBlocked as exc:
+        exc.master_snapshot = locals().get('master')
+        exc.report_snapshot = locals().get('report')
         raise
     except Exception as exc:
-        raise ScheduledRunBlocked(f'scheduled run gate failed: {type(exc).__name__}: {exc}') from exc
+        blocked = ScheduledRunBlocked(f'scheduled run gate failed: {type(exc).__name__}: {exc}')
+        blocked.master_snapshot = locals().get('master')
+        blocked.report_snapshot = locals().get('report')
+        raise blocked from exc
 
 def dry_run_from_env(): return execute_from_env(False)
 
@@ -128,6 +160,7 @@ def main():
                 time.sleep(max(60,a.interval_seconds))
         else: result=rollback(a.state_dir,a.confirm)
     except ScheduledRunBlocked as exc:
-        print(json.dumps({'status':'blocked','publish_allowed':False,'reason':str(exc)},ensure_ascii=False,sort_keys=True)); return 2
+        payload = _diagnostic(getattr(exc, 'master_snapshot', None), getattr(exc, 'report_snapshot', None), str(exc), type(exc).__name__)
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True)); return 2
     print(json.dumps(result,ensure_ascii=False,sort_keys=True)); return 0
 if __name__=='__main__': raise SystemExit(main())
