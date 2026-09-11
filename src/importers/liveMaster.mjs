@@ -55,7 +55,7 @@ export function mapClient(o) {
 }
 export function mapStaff(o) {
   const nvId = String(o['ID NHÂN VIÊN'] ?? '').trim() || null;
-  const status = o['TRẠNG THÁI'] ?? o['STATUS'] ?? '';
+  const status = o['TÌNH TRẠNG'] ?? o['TRẠNG THÁI'] ?? o['STATUS'] ?? '';
   return { nv_id: nvId, name: String(o['TÊN NHÂN VIÊN'] ?? '').trim(), role: String(o['VỊ TRÍ'] ?? '').trim(), channels_count: Math.round(parseNumberVN(o['SỐ LƯỢNG KÊNH'])), report_file_id: String(o['LINK REPORT'] ?? '').trim() || null, raw_row: o.__values, active: !isInactiveStatus(status) && !INACTIVE_STAFF_IDS.has(String(nvId || '').toUpperCase()) };
 }
 export function mapBrand(o) {

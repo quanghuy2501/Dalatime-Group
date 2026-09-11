@@ -22,6 +22,15 @@ No command in this folder writes to Google Drive/Sheets unless explicitly implem
 
 `npm run sync:readonly` creates an atomic, locked Master snapshot under `reports/phase4` from the repository's extracted CSV fixtures. It never invokes an importer, SQL, or a Google write API. Set `MASTER_FIXTURE_DIR` to use another fixture directory. Live export is explicitly opt-in with `READONLY_LIVE=1` plus `GOOGLE_APPLICATION_CREDENTIALS`; the exporter requests only Sheets read-only and Drive metadata read-only scopes, reads each sheet in bounded row ranges (500 rows by default), and retries HTTP 429 responses with backoff. It spools each completed sheet atomically and does not lock or fingerprint the final snapshot until every sheet has been processed. Set `READONLY_COMPARISON_SNAPSHOT` to emit JSON and Markdown discrepancy audits by post URL, post URL/brand, and staff ID/status.
 
+Current-watermark DB parity is fail-closed and read-only:
+
+```bash
+npm run phase4:export
+npm run phase4:parity -- --snapshot reports/phase4/master-snapshot-complete-<UTC-stamp>.json
+```
+
+The parity gate removes title, instruction, header, empty, and invalid schema/status rows. It compares valid client/staff/channel/brand records, distinct canonical `post_url` values, and distinct canonical `(post_url, brand)` values. Reports under `reports/phase4/current-watermark-parity-*.{json,md}` contain the source run ID and watermark, counts, latency, and complete missing/extra lists. A missing source/DB snapshot or any real distinct-key difference blocks publication and DB repair.
+
 The underlying CLI is `python3 scripts/master_snapshot.py`. Use `snapshot --fixture-dir DIR --output FILE` (or `snapshot --live --output FILE`) and `audit --master FILE --against FILE --json FILE --md FILE` for direct automation.
 
 Database migration/import is intentionally separate and explicit: `npm run phase1:import` (writes the configured database and must not be used for read-only checks).

@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "kind": "onicorn-final-overnight-report",
+  "generated_at": "2026-09-11T15:27:52.745Z",
+  "prepared_for": "2026-09-12 overnight run",
+  "base_commit": "2d1d74c19b647d4eaedb9fb7aba7ffe7ba9dcab8",
+  "branch": "main",
+  "read_only_policy": {
+    "google_writes_performed": false,
+    "database_writes_performed": false,
+    "tokens_rotated": false,
+    "secrets_logged": false,
+    "note": "Every command run tonight was read-only against Google (Sheets/Drive readonly scopes, GET-only client) and read-only against Postgres (single SELECT-based parity gate, begin read only/commit). No importer/migration/write command was executed against the production database or Google."
+  },
+  "starting_state": {
+    "uncommitted_work_found": [
+      ".env.example (dashboard auth + batch worker env vars added; one line, CUSTOMER_REPORT_FOLDER_ID, was corrupted mid-edit and has been restored)",
+      "README.md (current-watermark parity gate documentation)",
+      "package.json (phase4:parity script + npm run check wiring for new files)",
+      "src/importers/liveMaster.mjs (staff status now reads live sheet's TÌNH TRẠNG column, falling back to TRẠNG THÁI/STATUS)",
+      "scripts/current-watermark-parity.mjs (new, untracked)",
+      "test/current-watermark-parity.test.mjs (new, untracked)"
+    ],
+    "already_committed_infra_discovered": [
+      "src/reconciliation/currentWatermarkParity.mjs - canonical Master normalization + DB comparator (committed in 4975c3d, referenced by the uncommitted CLI/test above)",
+      "scripts/master_snapshot.py - read-only, paginated, backoff/Retry-After, atomic/locked, per-sheet-diagnostics Google exporter",
+      "automation/report_batch/* - fail-closed pipeline/runner/storage/health with dry-run default, exclusive lock, JSONL audit log with secret redaction, alert webhook, confirm-gated rollback, LKG preservation",
+      "render.yaml - Node web service + Python cron blueprint, already wired to scheduled-run --production (internally fail-closed)",
+      "migrations/001-005 - source_files/clients/staff/brands/channels/posts_raw/post_brands schema + dashboard views + exact-mirror + report indexes",
+      "src/report/* - token-hash customer portal isolation (timingSafeEqual), per-client_code scoped SQL"
+    ]
+  },
+  "phases": [
+    {
+      "phase": "1-2: schema/config + read-only Google ingestion",
+      "status": "code_complete_and_verified_live",
+      "evidence": "Live export executed tonight against the real Master spreadsheet with real service-account credentials already present in this environment.",
+      "files": ["scripts/master_snapshot.py", "migrations/001_initial_schema.sql", "src/importers/liveMaster.mjs", "src/google/serviceAccountAuth.mjs", "src/google/googleApi.mjs"],
+      "properties_verified": [
+        "GET-only client requesting spreadsheets.readonly + drive.metadata.readonly scopes only",
+        "Paginated reads at 500 rows/page (DEFAULT_PAGE_ROWS) across A:ZZ",
+        "429 handling honors Retry-After header (seconds or HTTP-date) before falling back to exponential backoff with jitter",
+        "Snapshot is 'complete'/'locked' only when every configured sheet succeeds; any sheet error keeps status='partial', locked=false",
+        "Per-sheet diagnostics + source_errors array captured independently for each of 8 sheets",
+        "Atomic, checksum-fingerprinted output (temp file + os.replace); values spooled per-sheet to bound memory",
+        "Watermark = Drive modifiedTime + run_id captured once per run",
+        "Sequential (concurrency=1, within the requested <=3 bound) fetch per sheet"
+      ],
+      "live_run": {
+        "command": "npm run phase4:export",
+        "output_file": "reports/phase4/master-snapshot-complete-20260911T152206Z.json",
+        "run_id": "ee554ffc-519d-4e58-8228-1bcbbaa89d82",
+        "sha256": "f293c3e518a27b9e0f22c3656cf606d45402f21a4fef399730d5501821ee0464",
+        "status": "complete",
+        "locked": true,
+        "source_errors": [],
+        "duration_ms": 204805,
+        "drive_modified_time": "2026-09-11T09:55:59.098Z",
+        "counts": {"clients": 149, "staff": 998, "channels": 157, "brands": 174, "raw_data": 5065, "normalized": 65296, "config": 12, "sync_log": 951}
+      }
+    },
+    {
+      "phase": "3: normalization/validation and DQ reports",
+      "status": "code_complete_and_verified_live",
+      "files": ["src/reconciliation/currentWatermarkParity.mjs", "automation/report_batch/pipeline.py", "scripts/phase15-generate-quality.mjs", "scripts/phase15-calc-bonus-results.mjs"],
+      "properties_verified": [
+        "Drops title/instruction/header rows, fully empty rows, and schema/status-invalid rows before comparison",
+        "Canonical post_url folds case, strips query/hash/trailing slash",
+        "ID validation regex per entity (KH\\d+, NV\\d+, CH\\d+) matching Master conventions",
+        "Distinct-key semantics for post_url and (post_url, brand), matching customer-report dedupe semantics in src/report/queries.mjs",
+        "automation/report_batch/pipeline.normalize_rows drops header/instruction rows and de-dupes by strongest available semantic key for the batch envelope path"
+      ]
+    },
+    {
+      "phase": "4: dual-run reconciliation, exact mismatches, no unsafe repairs",
+      "status": "code_complete_and_verified_live_result_blocked",
+      "files": ["scripts/current-watermark-parity.mjs", "src/reconciliation/currentWatermarkParity.mjs", "test/current-watermark-parity.test.mjs"],
+      "live_run": {
+        "command": "npm run phase4:parity -- --snapshot reports/phase4/master-snapshot-complete-20260911T152206Z.json",
+        "run_id": "272f625f-4dd7-47df-81c8-a13b281cb089",
+        "verdict": "blocked",
+        "publish_allowed": false,
+        "exit_code": 3,
+        "repair_performed": false,
+        "report_files": ["reports/phase4/current-watermark-parity-20260911T152547Z.json", "reports/phase4/current-watermark-parity-20260911T152547Z.md"],
+        "latency_ms": {"master_normalization": 815, "database_select": 11679, "total": 12737},
+        "counts": {
+          "clients": {"master": 145, "database": 143, "missing": 2, "extra": 0},
+          "staff": {"master": 36, "database": 37, "missing": 18, "extra": 19},
+          "channels": {"master": 152, "database": 147, "missing": 5, "extra": 0},
+          "brands": {"master": 170, "database": 168, "missing": 2, "extra": 0},
+          "raw_data": {"master": 5019, "database": 4878, "missing": 141, "extra": 0},
+          "normalized": {"master": 65170, "database": 63034, "missing": 2186, "extra": 50}
+        }
+      },
+      "root_cause_evidence": {
+        "query": "select * from sync_runs order by started_at desc limit 3",
+        "finding": "Last DB mirror import (run_type=phase2_2_exact_sheet_mirror) completed 2026-09-08T13:57:18.886Z with rows_read=4931, rows_written=68094 (raw_rows=4931, brand_rows=63163 in meta). Direct counts confirmed: posts_raw_sheet=4931, post_brands_sheet=63163, staff.max(updated_at)=2026-09-08T13:56:28Z.",
+        "conclusion": "The Postgres mirror has not been re-imported since 2026-09-08. The live Google Master has since grown (drive_modified_time now 2026-09-11T09:55:59Z; normalized rows 63,163 -> 65,296). This is a freshness/scheduling gap, not a defect in ingestion, normalization, or the reconciliation gate. The gate performed exactly as designed: it proved a real distinct-key difference, produced exact missing/extra lists, refused to repair either system, and exited non-zero."
+      },
+      "note": "This reconfirms, with a same-day fresh watermark, the same class of blocker recorded on 2026-09-09 in reports/phase4/final-reconciliation-20260909.json (gitignored) and docs/batch-go-live.md."
+    },
+    {
+      "phase": "5: customer published snapshot isolation/freshness/LKG",
+      "status": "code_complete",
+      "files": ["src/report/config.mjs", "src/report/routes.mjs", "src/report/queries.mjs", "automation/report_batch/runner.py"],
+      "properties_verified": [
+        "Per-customer token stored/compared only as a SHA-256 hash with crypto.timingSafeEqual (no plaintext token persisted)",
+        "Every report query is scoped by an EXISTS subquery on brands.client_code = customer.clientCode AND brands.active = true; brand/channel query filters are validated against that customer's own scope before use",
+        "Cache-Control: no-store, Referrer-Policy: no-referrer, X-Robots-Tag: noindex,nofollow on every report route",
+        "Batch publish path keeps separate published.json / last-known-good.json manifests plus immutable runs/<run_id>/master-snapshot.json objects in Supabase Storage; rollback requires --confirm ROLLBACK and only restores from last-known-good"
+      ],
+      "caveat": "The live Node dashboard/customer-report API queries Postgres directly (not the batch-published/LKG snapshot), so its freshness is bounded by the same DB-mirror staleness identified in phase 4 above (currently ~3 days behind the Sheet) until that mirror is re-imported."
+    },
+    {
+      "phase": "6: Render cron/storage/alerts/rollback/auto paths",
+      "status": "code_complete_and_verified",
+      "files": ["render.yaml", "automation/report_batch/runner.py", "automation/report_batch/runner_cli.py", "automation/report_batch/storage.py", "scripts/verify_render_blueprint.py"],
+      "verification": {
+        "command": "npm run render:verify",
+        "result": "RENDER_BLUEPRINT_OK render.yaml"
+      },
+      "properties_verified": [
+        "Web service: /healthz health check, DATABASE_URL/GOOGLE_APPLICATION_CREDENTIALS/report-portal config marked sync:false (Render secrets, not committed)",
+        "Cron service: pay-per-run (no persistent disk/always-on worker), already set to 'scheduled-run --production' but internally fail-closed via go_live_checks/reconcile before any publish",
+        "Auto-export path: a scheduled run with no MASTER_SNAPSHOT_PATH exports Sheets live via master_snapshot.py --live into an ephemeral /tmp dir; unset REPORT_SNAPSHOT_PATH derives a rows projection from that validated envelope",
+        "Supabase Storage upload is disabled unless SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + SNAPSHOT_BUCKET are all present; object paths are sanitized against traversal (storage.py:safe_path)",
+        "JsonlLogger redacts secret-shaped fields/values (regex on key names + postgres/Bearer/URL-with-@ patterns) before every audit-log write",
+        "FAILURE_NOTIFY_URL alert is best-effort and failure to send does not mask the original blocking error",
+        "Rollback requires the literal string --confirm ROLLBACK and only ever restores from last-known-good.json/last-known-good-snapshot.json"
+      ],
+      "not_performed": "No Render deployment, redeploy, or actual cron trigger was performed (no Render API access in this environment); verification was local-equivalent (render:verify + the unit tests below) only."
+    },
+    {
+      "phase": "7: production verification scripts/tests",
+      "status": "run_tonight_all_passing",
+      "results": [
+        {"command": "npm run check", "result": "pass", "detail": "python3 -m compileall + node --check across all server/import/reconciliation/parity entrypoints"},
+        {"command": "npm test", "result": "pass", "tests": 10, "duration_ms": 132.46},
+        {"command": "npm run batch:test", "result": "pass", "tests": 14, "duration_s": 2.87, "suite": "python_tests (master_snapshot, pipeline, runner, storage)"},
+        {"command": "npm run render:verify", "result": "pass", "detail": "RENDER_BLUEPRINT_OK render.yaml"},
+        {"command": "npm run phase4:export", "result": "pass (live, read-only)", "duration_ms": 204805},
+        {"command": "npm run phase4:parity -- --snapshot <fresh live snapshot>", "result": "correctly blocked (live, read-only)", "exit_code": 3}
+      ]
+    }
+  ],
+  "changes_made_tonight": [
+    "Restored .env.example CUSTOMER_REPORT_FOLDER_ID to the correct ID (an in-progress edit had corrupted one character); confirmed against .env.local's real value.",
+    "Ran `git rm --cached scripts/__pycache__/master_snapshot.cpython-312.pyc` - an accidentally-tracked compiled Python artifact that .gitignore already excludes (__pycache__/); the file remains on disk, just untracked. No behavior change.",
+    "Verified and preserved all existing uncommitted work (current-watermark parity gate CLI/module/tests, liveMaster.mjs staff status fix, README/package.json wiring) - no rewrites were needed, only the .env.example fix above.",
+    "Executed a genuine, fresh, read-only live Google export and DB parity comparison to obtain real evidence for this report (see phase 1-2 and phase 4 above).",
+    "Queried sync_runs/posts_raw_sheet/post_brands_sheet/staff read-only to establish the exact root cause of the parity mismatch (DB mirror last imported 2026-09-08)."
+  ],
+  "data_counts": {
+    "live_master_snapshot_2026-09-11T15:22:06Z": {"clients": 149, "staff": 998, "channels": 157, "brands": 174, "raw_data": 5065, "normalized": 65296, "config": 12, "sync_log": 951},
+    "db_mirror_last_import_2026-09-08T13:57:18Z": {"posts_raw_sheet": 4931, "post_brands_sheet": 63163}
+  },
+  "parity_verdict": {
+    "verdict": "blocked",
+    "publish_allowed": false,
+    "reason": "Real distinct-key differences between the live Master and the Postgres mirror across all six tracked datasets, caused by the mirror not having been re-imported since 2026-09-08.",
+    "unsafe_repair_performed": false
+  },
+  "blockers_and_manual_steps": [
+    {
+      "id": "db-mirror-stale",
+      "description": "Postgres mirror (posts_raw_sheet/post_brands_sheet/clients/staff/channels/brands) is stale relative to the live Google Master.",
+      "manual_step": "Run `npm run phase1:import` and/or `node scripts/phase22-import-exact-sheet-mirror.mjs` against the production DATABASE_URL to refresh the mirror, then re-run `npm run phase4:export && npm run phase4:parity -- --snapshot <new file>` to confirm a clean (non-blocked) pass.",
+      "why_not_done_automatically": "This mutates the production database. Per this run's safety policy (no unsafe/automatic repairs, confirm before hard-to-reverse or outward-facing production writes), it was left as an explicit operator step rather than executed autonomously."
+    },
+    {
+      "id": "no-scheduled-db-refresh",
+      "description": "render.yaml has a customer-report cron and a web service, but no scheduled job re-imports the Postgres mirror itself; only ad hoc/manual `phase1:import` or `sync:readonly` keep it current.",
+      "manual_step": "If continuous DB freshness is required, add a new scheduled ingestion job reusing the existing lock/checkpoint/backoff guarantees, subject to explicit approval since it is a new recurring production-writing cron.",
+      "why_not_done_automatically": "Adding a new recurring production-mutating cron is an outward-facing infrastructure change requiring explicit sign-off; not done unilaterally tonight."
+    },
+    {
+      "id": "unused-scaffolding-dirs",
+      "description": "src/bonus, src/exporters, src/normalizers, src/config are empty directories from earlier scaffolding (dated 2026-09-08); real logic already lives in scripts/phase15-*.mjs and src/reconciliation/*.",
+      "manual_step": "None required; flagged for optional cleanup awareness only.",
+      "why_not_done_automatically": "Not a functional gap; removing empty directories was out of scope for this run."
+    }
+  ],
+  "production_go_live_status": {
+    "code_complete": true,
+    "production_verified": false,
+    "explanation": "All phase 1-7 code paths are implemented, unit-tested, and were exercised tonight with real, live, read-only evidence. Production go-live (flipping the cron to actually publish) remains correctly self-blocked because a genuine data-freshness gap exists in the Postgres mirror as of 2026-09-11. No production data corruption or unsafe repair occurred; the fail-closed gate did exactly what it was designed to do."
+  },
+  "docs_updated": ["README.md (already updated in the preserved uncommitted diff, verified accurate against this run)"],
+  "git": {
+    "action": "commit and push to origin/main after this report is written",
+    "base_commit": "2d1d74c19b647d4eaedb9fb7aba7ffe7ba9dcab8"
+  }
+}

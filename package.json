@@ -6,7 +6,7 @@
   "scripts": {
     "audit:local": "node scripts/audit-local-csv.mjs",
     "import:local": "node scripts/import-local-csv.mjs",
-    "check": "python3 -m compileall -q automation scripts/master_snapshot.py python_tests && node --check scripts/audit-local-csv.mjs && node --check scripts/import-local-csv.mjs && node --check src/server.mjs && node --check src/auth.mjs && node --check src/report/config.mjs && node --check src/report/queries.mjs && node --check src/report/routes.mjs && node --check src/importers/liveMaster.mjs && node --check scripts/phase1-import-master-to-db.mjs && node --check scripts/run-readonly-sync-cycle.mjs",
+    "check": "python3 -m compileall -q automation scripts/master_snapshot.py python_tests && node --check scripts/audit-local-csv.mjs && node --check scripts/import-local-csv.mjs && node --check src/server.mjs && node --check src/auth.mjs && node --check src/report/config.mjs && node --check src/report/queries.mjs && node --check src/report/routes.mjs && node --check src/importers/liveMaster.mjs && node --check src/reconciliation/currentWatermarkParity.mjs && node --check scripts/current-watermark-parity.mjs && node --check scripts/phase1-import-master-to-db.mjs && node --check scripts/run-readonly-sync-cycle.mjs",
     "test": "node --test",
     "portal:token": "node scripts/generate-report-token.mjs",
     "portal:activate-active": "node scripts/activate-report-tokens.mjs",
@@ -20,6 +20,7 @@
     "phase3:diff": "node --env-file=.env.local scripts/phase3-diff-staging-vs-production.mjs",
     "phase3:production-approval-check": "node scripts/phase3-production-write-guard.mjs",
     "phase4:export": "node --env-file=.env.local scripts/phase4-export-master.mjs",
+    "phase4:parity": "node --env-file=.env.local scripts/current-watermark-parity.mjs",
     "batch:snapshot": "python3 -m automation.report_batch.snapshot_adapter",
     "batch:dry-run": "python3 -m automation.report_batch.runner_cli worker --interval-seconds 3600",
     "batch:check": "python3 -m automation.report_batch.runner_cli check",
