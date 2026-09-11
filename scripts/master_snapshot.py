@@ -33,6 +33,7 @@ FILE_NAMES = {v: f"extracted_{v.replace(' ', '_')}.csv" for v in {**SHEETS, **OP
 FILE_NAMES.update({"1. KHACH HANG": "extracted_1._KHACH_HANG.csv", "2. NHAN SU": "extracted_2._NHAN_SU.csv", "3. CHANNEL": "extracted_3._CHANNEL.csv", "4. LIST BRAND": "extracted_4._LIST_BRAND.csv"})
 DEFAULT_MASTER_ID = "1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0"
 READONLY_SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.metadata.readonly"
+DEFAULT_PAGE_ROWS = 500
 
 
 def now_iso():
@@ -106,72 +107,175 @@ class ReadonlyGoogle:
                 delay = float(retry_after) if retry_after else min(60, self.base_delay * (2 ** attempt)) + random.random()
                 time.sleep(delay)
 
-    def values(self, spreadsheet_id, title):
-        # Open-ended A:ZZ fetches every populated row, independent of dataset size.
-        quoted = urllib.parse.quote(f"'{title.replace(chr(39), chr(39) * 2)}'!A:ZZ", safe="")
+    def values_page(self, spreadsheet_id, title, start_row, end_row):
+        quoted = urllib.parse.quote(f"'{title.replace(chr(39), chr(39) * 2)}'!A{start_row}:ZZ{end_row}", safe="")
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{quoted}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER"
         return self.get(url).get("values", [])
 
-    def sheet_titles(self, spreadsheet_id):
-        fields = urllib.parse.quote("sheets(properties(title))", safe="")
+    def sheet_dimensions(self, spreadsheet_id):
+        fields = urllib.parse.quote("sheets(properties(title,gridProperties(rowCount)))", safe="")
         data = self.get(f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}?fields={fields}")
-        return {item.get("properties", {}).get("title") for item in data.get("sheets", [])}
+        return {item.get("properties", {}).get("title"): int(item.get("properties", {}).get("gridProperties", {}).get("rowCount", 0)) for item in data.get("sheets", [])}
 
     def modified_time(self, spreadsheet_id):
         fields = urllib.parse.quote("id,name,modifiedTime", safe="")
         return self.get(f"https://www.googleapis.com/drive/v3/files/{spreadsheet_id}?fields={fields}&supportsAllDrives=true")
 
 
-def source_record(title, rows, origin):
-    width = max((len(row) for row in rows), default=0)
-    return {"sheet": title, "origin": origin, "row_count": len(rows), "column_count": width, "values": rows}
+def _write_values(path, rows):
+    """Atomically spool a JSON values array while retaining only one row in memory."""
+    part = path.with_suffix(".part")
+    count = width = 0
+    try:
+        with part.open("w", encoding="utf-8") as handle:
+            handle.write("[")
+            for row in rows:
+                if count:
+                    handle.write(",")
+                json.dump(row, handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                count += 1
+                width = max(width, len(row))
+            handle.write("]")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(part, path)
+        return count, width
+    finally:
+        if part.exists():
+            part.unlink()
+
+
+def _fixture_rows(path):
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        yield from csv.reader(handle)
+
+
+def _google_rows(api, spreadsheet_id, title, row_count, page_rows):
+    """Yield A:ZZ exactly, including internal but not trailing empty rows."""
+    emitted = 0
+    for start in range(1, row_count + 1, page_rows):
+        values = api.values_page(spreadsheet_id, title, start, min(row_count, start + page_rows - 1))
+        if not values:
+            continue
+        while emitted < start - 1:
+            yield []
+            emitted += 1
+        for row in values:
+            yield row
+            emitted += 1
+
+
+def _copy_file(source, target, chunk_size=1024 * 1024):
+    with source.open("r", encoding="utf-8") as handle:
+        while chunk := handle.read(chunk_size):
+            target.write(chunk)
+
+
+def _fingerprint_artifacts(sources):
+    digest = hashlib.sha256()
+    digest.update(b"{")
+    for index, key in enumerate(sorted(sources)):
+        source = sources[key]
+        if index:
+            digest.update(b",")
+        digest.update(canonical(key)); digest.update(b":{")
+        for field_index, field in enumerate(("column_count", "row_count", "sheet", "values")):
+            if field_index:
+                digest.update(b",")
+            digest.update(canonical(field)); digest.update(b":")
+            if field == "values":
+                with source["values_path"].open("rb") as handle:
+                    while chunk := handle.read(1024 * 1024):
+                        digest.update(chunk)
+            else:
+                digest.update(canonical(source[field]))
+        digest.update(b"}")
+    digest.update(b"}")
+    return digest.hexdigest()
+
+
+def _atomic_snapshot(path, snapshot, sources):
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("{")
+            fields = list(snapshot.items())
+            for index, (key, value) in enumerate(fields):
+                if index:
+                    handle.write(",")
+                json.dump(key, handle); handle.write(":")
+                json.dump(value, handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            if fields:
+                handle.write(",")
+            handle.write('"sources":{')
+            for index, (key, source) in enumerate(sources.items()):
+                if index:
+                    handle.write(",")
+                json.dump(key, handle); handle.write(":{")
+                for field_index, field in enumerate(("sheet", "origin", "row_count", "column_count")):
+                    if field_index:
+                        handle.write(",")
+                    json.dump(field, handle); handle.write(":")
+                    json.dump(source[field], handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                handle.write(',"values":')
+                _copy_file(source["values_path"], handle)
+                handle.write("}")
+            handle.write("}}\n"); handle.flush(); os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def export_snapshot(args):
     started = now_iso(); started_mono = time.monotonic(); run_id = str(uuid.uuid4()); sources = {}; errors = []; diagnostics = {}
     watermark = {"captured_at": started, "run_id": run_id}
-    api = None
-    if args.live:
-        if not args.credentials:
-            raise SystemExit("--live requires --credentials or GOOGLE_APPLICATION_CREDENTIALS")
-        api = ReadonlyGoogle(args.credentials, args.retries, args.base_delay)
-        try:
-            meta = api.modified_time(args.master_id)
-            titles = api.sheet_titles(args.master_id)
-            watermark = {"drive_modified_time": meta.get("modifiedTime"), "captured_at": started, "run_id": run_id}
-            for key, title in OPTIONAL_SHEETS.items():
-                if title in titles: SHEETS[key] = title
-        except Exception as exc:
-            errors.append({"source": "master_metadata", "error": str(exc)})
-    fixture_dir = Path(args.fixture_dir) if args.fixture_dir else None
-    for key, title in SHEETS.items():
-        sheet_started = time.monotonic()
-        try:
-            if api:
-                rows = api.values(args.master_id, title)
-                origin = f"google:{args.master_id}:{title}"
-            else:
-                file = fixture_dir / FILE_NAMES[title]
-                with file.open(newline="", encoding="utf-8-sig") as handle:
-                    rows = list(csv.reader(handle))
-                origin = str(file.resolve())
-            sources[key] = source_record(title, rows, origin)
-            diagnostics[key] = {"sheet": title, "status": "ok", "rows": len(rows), "columns": max((len(r) for r in rows), default=0), "duration_ms": round((time.monotonic() - sheet_started) * 1000)}
-        except Exception as exc:
-            diagnostics[key] = {"sheet": title, "status": "error", "duration_ms": round((time.monotonic() - sheet_started) * 1000), "error": f"{type(exc).__name__}: {exc}"}
-            errors.append({"source": key, "sheet": title, "error": f"{type(exc).__name__}: {exc}"})
-    finished = now_iso(); complete = not errors and set(sources) == set(SHEETS)
-    snapshot = {
-        "schema_version": 1, "kind": "onicorn-master-snapshot", "run_id": run_id,
-        "started_at": started, "finished_at": finished, "watermark": watermark,
-        "status": "complete" if complete else "partial", "locked": complete,
-        "read_only": True, "master_spreadsheet_id": args.master_id if api else None,
-        "master_dimensions": {key: {"sheet": value["sheet"], "rows": value["row_count"], "columns": value["column_count"]} for key, value in sources.items()},
-        "source_errors": errors, "diagnostics": diagnostics, "duration_ms": round((time.monotonic() - started_mono) * 1000), "sources": sources,
-    }
-    snapshot["sha256"] = fingerprint(sources)
-    atomic_json(args.output, snapshot)
-    print(json.dumps({"output": str(Path(args.output).resolve()), "status": snapshot["status"], "locked": snapshot["locked"], "sha256": snapshot["sha256"], "counts": {k: v["row_count"] for k, v in sources.items()}, "errors": errors}, ensure_ascii=False))
+    if args.page_rows < 1:
+        raise SystemExit("--page-rows must be at least 1")
+    api = None; dimensions = {}; sheet_map = dict(SHEETS)
+    output_parent = Path(args.output).resolve().parent; output_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".master-snapshot-sheets-", dir=output_parent) as temp_dir:
+        if args.live:
+            if not args.credentials:
+                raise SystemExit("--live requires --credentials or GOOGLE_APPLICATION_CREDENTIALS")
+            api = ReadonlyGoogle(args.credentials, args.retries, args.base_delay)
+            try:
+                meta = api.modified_time(args.master_id); dimensions = api.sheet_dimensions(args.master_id)
+                watermark = {"drive_modified_time": meta.get("modifiedTime"), "captured_at": started, "run_id": run_id}
+                for key, title in OPTIONAL_SHEETS.items():
+                    if title in dimensions: sheet_map[key] = title
+            except Exception as exc:
+                errors.append({"source": "master_metadata", "error": str(exc)})
+        fixture_dir = Path(args.fixture_dir) if args.fixture_dir else None
+        for key, title in sheet_map.items():
+            sheet_started = time.monotonic(); values_path = Path(temp_dir) / f"{key}.json"
+            try:
+                if api:
+                    if title not in dimensions:
+                        raise KeyError(f"sheet not found: {title}")
+                    rows = _google_rows(api, args.master_id, title, dimensions[title], args.page_rows)
+                    origin = f"google:{args.master_id}:{title}"
+                else:
+                    file = fixture_dir / FILE_NAMES[title]; rows = _fixture_rows(file); origin = str(file.resolve())
+                row_count, column_count = _write_values(values_path, rows)
+                sources[key] = {"sheet": title, "origin": origin, "row_count": row_count, "column_count": column_count, "values_path": values_path}
+                diagnostics[key] = {"sheet": title, "status": "ok", "rows": row_count, "columns": column_count, "duration_ms": round((time.monotonic() - sheet_started) * 1000)}
+            except Exception as exc:
+                diagnostics[key] = {"sheet": title, "status": "error", "duration_ms": round((time.monotonic() - sheet_started) * 1000), "error": f"{type(exc).__name__}: {exc}"}
+                errors.append({"source": key, "sheet": title, "error": f"{type(exc).__name__}: {exc}"})
+        complete = not errors and set(sources) == set(sheet_map)
+        sha256 = _fingerprint_artifacts(sources)
+        snapshot = {
+            "schema_version": 1, "kind": "onicorn-master-snapshot", "run_id": run_id,
+            "started_at": started, "finished_at": now_iso(), "watermark": watermark,
+            "status": "complete" if complete else "partial", "locked": complete,
+            "read_only": True, "master_spreadsheet_id": args.master_id if api else None,
+            "master_dimensions": {key: {"sheet": value["sheet"], "rows": value["row_count"], "columns": value["column_count"]} for key, value in sources.items()},
+            "source_errors": errors, "diagnostics": diagnostics, "duration_ms": round((time.monotonic() - started_mono) * 1000), "sha256": sha256,
+        }
+        _atomic_snapshot(args.output, snapshot, sources)
+    print(json.dumps({"output": str(Path(args.output).resolve()), "status": snapshot["status"], "locked": snapshot["locked"], "sha256": sha256, "counts": {k: v["row_count"] for k, v in sources.items()}, "errors": errors}, ensure_ascii=False))
     return 0 if complete else 2
 
 
@@ -227,7 +331,7 @@ def audit(args):
 def parser():
     p = argparse.ArgumentParser(); sub = p.add_subparsers(dest="command", required=True)
     s = sub.add_parser("snapshot"); mode = s.add_mutually_exclusive_group(required=True); mode.add_argument("--fixture-dir"); mode.add_argument("--live", action="store_true")
-    s.add_argument("--master-id", default=os.getenv("MASTER_SPREADSHEET_ID", DEFAULT_MASTER_ID)); s.add_argument("--credentials", default=os.getenv("GOOGLE_APPLICATION_CREDENTIALS")); s.add_argument("--output", required=True); s.add_argument("--retries", type=int, default=6); s.add_argument("--base-delay", type=float, default=1.0); s.set_defaults(func=export_snapshot)
+    s.add_argument("--master-id", default=os.getenv("MASTER_SPREADSHEET_ID", DEFAULT_MASTER_ID)); s.add_argument("--credentials", default=os.getenv("GOOGLE_APPLICATION_CREDENTIALS")); s.add_argument("--output", required=True); s.add_argument("--retries", type=int, default=6); s.add_argument("--base-delay", type=float, default=1.0); s.add_argument("--page-rows", type=int, default=DEFAULT_PAGE_ROWS); s.set_defaults(func=export_snapshot)
     a = sub.add_parser("audit"); a.add_argument("--master", required=True); a.add_argument("--against", required=True); a.add_argument("--json", required=True); a.add_argument("--md", required=True); a.set_defaults(func=audit)
     return p
 

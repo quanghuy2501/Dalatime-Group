@@ -11,8 +11,10 @@ test('snapshot Google client exposes GET only and requests readonly scopes', () 
   assert.doesNotMatch(source, /method="(?:PUT|PATCH|DELETE)"/);
 });
 
-test('snapshot is full-range, fingerprints data, and locks only complete exports', () => {
-  assert.match(source, /!A:ZZ/);
+test('snapshot is paginated over the full A:ZZ range, fingerprints data, and locks only complete exports', () => {
+  assert.match(source, /!A\{start_row\}:ZZ\{end_row\}/);
+  assert.match(source, /gridProperties\(rowCount\)/);
+  assert.match(source, /DEFAULT_PAGE_ROWS = 500/);
   assert.doesNotMatch(source, /1500/);
   assert.match(source, /hashlib\.sha256/);
   assert.match(source, /"locked": complete/);
