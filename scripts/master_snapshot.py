@@ -104,7 +104,18 @@ class ReadonlyGoogle:
                 if exc.code != 429 or attempt == self.retries:
                     raise
                 retry_after = exc.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after else min(60, self.base_delay * (2 ** attempt)) + random.random()
+                delay = None
+                if retry_after:
+                    try:
+                        delay = max(0.0, float(retry_after))
+                    except ValueError:
+                        try:
+                            from email.utils import parsedate_to_datetime
+                            delay = max(0.0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                        except (TypeError, ValueError, OverflowError):
+                            delay = None
+                if delay is None:
+                    delay = min(30.0, self.base_delay * (2 ** attempt)) + random.random()
                 time.sleep(delay)
 
     def values_page(self, spreadsheet_id, title, start_row, end_row):
