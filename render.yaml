@@ -41,7 +41,7 @@ services:
     region: singapore
     schedule: "*/30 * * * *"
     buildCommand: npm ci
-    startCommand: npm run sync:nv
+    startCommand: npm run migrate:nv && npm run sync:nv
     envVars:
       - key: NODE_ENV
         value: production

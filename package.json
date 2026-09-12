@@ -17,6 +17,7 @@
     "api:smoke": "node scripts/api-smoke.mjs",
     "sync:readonly": "node scripts/run-readonly-sync-cycle.mjs",
     "sync:nv": "node scripts/direct-nv-sync.mjs",
+    "migrate:nv": "node scripts/migrate-direct-nv.mjs",
     "phase3:verify-staging": "node --env-file=.env.local scripts/phase3-verify-staging.mjs",
     "phase3:diff": "node --env-file=.env.local scripts/phase3-diff-staging-vs-production.mjs",
     "phase3:production-approval-check": "node scripts/phase3-production-write-guard.mjs",
