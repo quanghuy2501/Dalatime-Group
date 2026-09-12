@@ -45,6 +45,20 @@ test('Google reader honors Retry-After on HTTP 429 and stays GET-only',async()=>
   finally {global.fetch=original;}
 });
 
+test('34 active registry sources are accepted without a hard-coded upper bound',async()=>{
+  const activeIds=[...Array.from({length:14},(_,i)=>i+1),...Array.from({length:20},(_,i)=>i+17)];
+  const activeSources=activeIds.map((id,i)=>({nv_id:`NV${String(id).padStart(2,'0')}`,google_file_id:`active-file-${i+1}`,sheet_name:'BAO CAO HANG NGAY',active:true,expected_columns:22}));
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-34-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify({sources:activeSources}));
+  const db={end:async()=>{},query:async sql=>{
+    if(sql.includes('select c.version'))return {rows:[{version:'master-v1',mapping:COLUMN_MAPPING}]};
+    if(sql.includes('insert into sync_runs'))return {rows:[{id:'00000000-0000-0000-0000-000000000034'}]};
+    return {rows:[]};
+  }};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}),values:async id=>({values:[header,data(Number(id.split('-').pop()))]})};
+  const result=await runDirectNvIngestion({db,api,registryFile:file,publisher:async(_db,runId,_version,rows,sourceCount)=>({runId,rows:rows.length,sourceCount})});
+  assert.equal(result.sourceCount,34); assert.equal(result.rows,34);
+});
+
 test('partial source failure never invokes publisher and preserves prior publication',async()=>{
   let published={run_id:'last-good'}; let publisherCalls=0;
   const registry={sources};const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-partial-'));const file=path.join(dir,'registry.json');fs.writeFileSync(file,JSON.stringify(registry));

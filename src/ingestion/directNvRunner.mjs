@@ -61,7 +61,11 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
   db ||= await connectDb(); let runId; let ownDb=!arguments[0]?.db;
   try {
     const config=await activeConfig(db); const sources=await discoverSources(db,registryFile);
-    if (sources.length<20 || sources.length>30) throw new Error(`active NV source count must be 20-30; got ${sources.length}`);
+    if (!sources.length) throw new Error('active NV source registry contains zero sources');
+    const expectedRaw=process.env.NV_EXPECTED_ACTIVE_COUNT;
+    if (expectedRaw !== undefined && (!/^\d+$/.test(expectedRaw) || Number(expectedRaw) !== sources.length)) {
+      throw new Error(`active NV source count does not match NV_EXPECTED_ACTIVE_COUNT; expected ${expectedRaw}, got ${sources.length}`);
+    }
     runId=(await db.query(`insert into sync_runs(run_type,status,files_total,meta) values('direct_nv_ingestion','running',$1,$2) returning id`,
       [sources.length,json({read_only_google:true,config_version:config.version,source:'employee-sheets',master_as_data:false})])).rows[0].id;
     api ||= await createReadonlyApi();
