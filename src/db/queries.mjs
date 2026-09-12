@@ -24,8 +24,8 @@ export async function getOverview(db, params = {}) {
     count(*) filter (where p.is_exclusive)::int as exclusive,
     count(distinct nullif(p.channel_name,''))::int as active_channels,
     count(distinct nullif(p.owner_name,''))::int as active_staff,
-    count(*) filter (where p.posted_date >= current_date - interval '7 days')::int as posts_7d,
-    coalesce(sum(p.realtime_view) filter (where p.posted_date >= current_date - interval '7 days'),0)::bigint as view_7d
+    count(*) filter (where p.posted_date between current_date - interval '6 days' and current_date)::int as posts_7d,
+    coalesce(sum(p.realtime_view) filter (where p.posted_date between current_date - interval '6 days' and current_date),0)::bigint as view_7d
     from posts_raw_sheet p ${where.length ? 'where ' + where.join(' and ') : ''}`;
   return (await db.query(sql, vals)).rows[0];
 }
@@ -86,14 +86,14 @@ export async function getMasters(db) {
 export async function getAlerts(db) {
   const [brandDrops, staffDrops, sleepingChannels, failedSync, trending, viralChannels] = await Promise.all([
     db.query(`with stats as (select pb.brand_name as name,
-      coalesce(sum(pb.realtime_view) filter (where pb.posted_date >= current_date-interval '7 days'),0)::bigint as view,
-      coalesce(sum(pb.realtime_view) filter (where pb.posted_date >= current_date-interval '14 days' and pb.posted_date < current_date-interval '7 days'),0)::bigint as view_prev
+      coalesce(sum(pb.realtime_view) filter (where pb.posted_date between current_date-interval '6 days' and current_date),0)::bigint as view,
+      coalesce(sum(pb.realtime_view) filter (where pb.posted_date between current_date-interval '13 days' and current_date-interval '7 days'),0)::bigint as view_prev
       from post_brands_sheet pb group by pb.brand_name)
       select name,view,"view_prev" as "viewPrev",round((view-view_prev)::numeric/nullif(view_prev,0)*100,1) as change from stats
       where view_prev>100 and (view-view_prev)::numeric/view_prev < -.3 order by change limit 8`),
     db.query(`with stats as (select coalesce(nullif(owner_name,''),'(Chưa gán)') as name,
-      coalesce(sum(realtime_view) filter (where posted_date >= current_date-interval '7 days'),0)::bigint as view,
-      coalesce(sum(realtime_view) filter (where posted_date >= current_date-interval '14 days' and posted_date < current_date-interval '7 days'),0)::bigint as view_prev
+      coalesce(sum(realtime_view) filter (where posted_date between current_date-interval '6 days' and current_date),0)::bigint as view,
+      coalesce(sum(realtime_view) filter (where posted_date between current_date-interval '13 days' and current_date-interval '7 days'),0)::bigint as view_prev
       from posts_raw_sheet group by coalesce(nullif(owner_name,''),'(Chưa gán)'))
       select name,view,"view_prev" as "viewPrev",round((view-view_prev)::numeric/nullif(view_prev,0)*100,1) as change from stats
       where view_prev>100 and (view-view_prev)::numeric/view_prev < -.3 order by change limit 8`),
@@ -104,7 +104,7 @@ export async function getAlerts(db) {
       order by "lastPostDays" desc limit 20`),
     db.query(`select started_at as timestamp,run_type as job,status,error from sync_runs where status='fail' order by started_at desc limit 10`),
     db.query(`select posted_date as date,brand_text_raw as brand,channel_name as channel,owner_name as owner,realtime_view as view,post_url as link
-      from posts_raw_sheet where posted_date>=current_date-interval '7 days' order by realtime_view desc nulls last limit 5`),
+      from posts_raw_sheet where posted_date between current_date-interval '6 days' and current_date order by realtime_view desc nulls last limit 5`),
     db.query(`select coalesce(nullif(channel_name,''),'(Chưa gán)') as name,count(*)::int as viral from posts_raw_sheet
       where coalesce(viral_label,'')<>'' group by coalesce(nullif(channel_name,''),'(Chưa gán)') order by viral desc limit 5`)
   ]);
@@ -130,24 +130,31 @@ export async function getPosts(db, { limit = 100, offset = 0, q = '', brand = ''
   const dirSql = String(dir).toLowerCase() === 'asc' ? 'asc' : 'desc';
   const where = [];
   const vals = [];
-  if (q) { vals.push(`%${q}%`); const p = `$${vals.length}`; where.push(`(p.brand_text_raw ilike ${p} or p.channel_name ilike ${p} or p.owner_name ilike ${p} or p.post_url ilike ${p})`); }
-  if (brand) { vals.push(`%${brand}%`); where.push(`p.brand_text_raw ilike $${vals.length}`); }
-  if (channel) { vals.push(channel); where.push(`p.channel_name = $${vals.length}`); }
-  if (staff) { vals.push(staff); where.push(`p.owner_name = $${vals.length}`); }
+  if (q) { vals.push(`%${q.trim()}%`); const p = `$${vals.length}`; where.push(`(p.brand_text_raw ilike ${p} or p.channel_name ilike ${p} or p.owner_name ilike ${p} or p.post_url ilike ${p})`); }
+  if (brand) { vals.push(`%${brand.trim()}%`); where.push(`exists (select 1 from post_brands_sheet pbf where pbf.raw_sheet_row_key=p.row_key and pbf.brand_name ilike $${vals.length})`); }
+  if (channel) { vals.push(channel.trim()); where.push(`lower(trim(p.channel_name)) = lower($${vals.length})`); }
+  if (staff) { vals.push(staff.trim()); where.push(`lower(trim(p.owner_name)) = lower($${vals.length})`); }
   if (from) { vals.push(from); where.push(`p.posted_date >= $${vals.length}`); }
   if (to) { vals.push(to); where.push(`p.posted_date <= $${vals.length}`); }
   const countVals = vals.slice();
-  vals.push(Math.min(Number(limit) || 100, 500)); const limitParam = `$${vals.length}`;
-  vals.push(Math.max(Number(offset) || 0, 0)); const offsetParam = `$${vals.length}`;
+  const safeLimit = Math.min(Math.max(Math.trunc(Number(limit)) || 100, 1), 500);
+  const safeOffset = Math.max(Math.trunc(Number(offset)) || 0, 0);
+  vals.push(safeLimit); const limitParam = `$${vals.length}`;
+  vals.push(safeOffset); const offsetParam = `$${vals.length}`;
   const whereSql = where.length ? 'where ' + where.join(' and ') : '';
-  const sql = `select p.id, p.posted_date, p.brand_text_raw, p.channel_name, p.owner_name, p.post_url,
+  const sql = `select p.id, p.posted_date::text as posted_date, p.brand_text_raw,
+    coalesce((select string_agg(distinct pb.brand_name, ', ' order by pb.brand_name)
+      from post_brands_sheet pb where pb.raw_sheet_row_key=p.row_key), nullif(p.brand_text_raw,''), '(Chưa tag brand)') as brand_names,
+    p.channel_name, p.owner_name, p.post_url,
     p.realtime_view, p.realtime_like, p.realtime_comment, p.realtime_save, p.realtime_share,
-    p.snapshot_view, p.viral_label, p.engagement_rate, p.bonus_amount, p.bonus_amount as calculated_bonus, null::text as bonus_reason
-    from posts_raw_sheet p left join bonus_results br on br.post_raw_id = p.id
+    p.snapshot_view, p.is_exclusive, p.viral_label,
+    case when coalesce(p.realtime_view,0)>0 then (${interactionsSql('p')})::numeric/p.realtime_view else 0 end as engagement_rate,
+    p.bonus_amount, p.bonus_amount as calculated_bonus, null::text as bonus_reason
+    from posts_raw_sheet p
     ${whereSql} order by ${sortSql} ${dirSql} nulls last limit ${limitParam} offset ${offsetParam}`;
   const countSql = `select count(*)::int count from posts_raw_sheet p ${whereSql}`;
   const [rows, count] = await Promise.all([db.query(sql, vals), db.query(countSql, countVals)]);
-  return { rows: rows.rows, total: count.rows[0].count, limit: Number(limit), offset: Number(offset) };
+  return { rows: rows.rows, total: count.rows[0].count, limit: safeLimit, offset: safeOffset };
 }
 
 export async function getTimeseries(db, params = {}) {

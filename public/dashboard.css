@@ -194,6 +194,34 @@ th { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spa
 .toast.error { background: #7f1d1d; }
 .toast.ok { background: #065f46; }
 
+/* Compact dashboard rhythm and hard intrinsic-size containment. */
+html, body { width: 100%; min-height: 100%; overflow-x: clip; }
+.shell { padding: 14px 16px; }
+.app { grid-template-columns: 208px minmax(0, 1fr); gap: 14px; }
+.side { padding: 14px; height: calc(100vh - 28px); top: 14px; overflow: hidden; }
+.brand-mark { margin-bottom: 14px; }
+.nav button { padding: 9px 10px; }
+.topbar { min-height: 58px; margin-bottom: 10px; }
+.topbar h1 { margin: 2px 0; font-size: 24px; line-height: 1.15; }
+.alert-strip { padding: 10px 12px; margin-bottom: 10px; }
+.todo-panel { padding: 12px 14px; margin-bottom: 10px; }
+.cards { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 9px; margin-bottom: 10px; }
+.kpi { padding: 12px; }
+.kpi strong { font-size: 22px; line-height: 1.15; margin-top: 4px; }
+.grid2, .grid3 { gap: 10px; }
+.panel { padding: 13px 14px; margin-bottom: 10px; }
+.panel h2 { margin-bottom: 9px; }
+.range-bar { padding: 9px 11px; margin-bottom: 10px; }
+.filters { display: grid; grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(130px, 1fr)) auto auto auto; gap: 7px; margin-bottom: 9px; }
+.filters input, .filters select { width: 100%; min-width: 0; padding: 7px 8px; }
+.chart { height: 190px; }
+th, td { padding: 8px 7px; }
+th { position: sticky; top: 0; z-index: 1; }
+.posts-table { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.posts-table table { min-width: 1380px; font-variant-numeric: tabular-nums; }
+.posts-table th:nth-child(n+5):nth-child(-n+10), .posts-table td:nth-child(n+5):nth-child(-n+10) { text-align: right; white-space: nowrap; }
+.posts-table td:nth-child(1), .posts-table td:nth-child(n+11) { white-space: nowrap; }
+
 @media print {
   @page { size: A4; margin: 10mm; }
   body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -219,9 +247,18 @@ th { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spa
   .panel { overflow-x: auto; }
   table { min-width: 640px; }
   .range-bar { padding: 10px; }
+  .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters #pq { grid-column: 1 / -1; }
 }
 
 @media (max-width: 480px) {
+  .shell { padding: 6px; }
+  .side { padding: 10px; border-radius: 12px; }
+  .topbar { min-height: 0; }
+  .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .button { padding-inline: 8px; }
+  .filters { grid-template-columns: minmax(0, 1fr); }
+  .filters #pq { grid-column: auto; }
   .cards { grid-template-columns: 1fr 1fr; }
   .kpi strong { font-size: 20px; }
   .heatmap-grid { grid-template-columns: minmax(105px, 125px) repeat(var(--week-count), 68px); }

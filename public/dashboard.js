@@ -3,7 +3,8 @@ const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toLocaleString('vi-VN');
 const pct = n => { const x = Number(n || 0); return ((Math.abs(x) > 1 ? x / 100 : x) * 100).toFixed(2) + '%'; };
 const esc = s => String(s ?? '').replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const localYmd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayStr = () => localYmd(new Date());
 const fmtDate = s => { if (!s) return ''; const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s).slice(0, 10); };
 const isFuture = s => !!s && String(s).slice(0, 10) > todayStr();
 // Posted dates in the future indicate bad source data (crawler/date-parse bug), not a real KPI — flag, don't hide.
@@ -117,14 +118,14 @@ function chart(rows) {
 // ---- Range filter (presets + custom, never allows a future date) ----
 function applyPreset(preset) {
   const today = new Date();
-  const iso = d => d.toISOString().slice(0, 10);
   range.preset = preset;
   if (preset === 'all') {
     range.from = ''; range.to = '';
   } else {
     const days = { '7d': 6, '14d': 13, '30d': 29, '90d': 89 }[preset];
-    range.to = iso(today);
-    range.from = iso(new Date(today.getTime() - days * 86400000));
+    range.to = localYmd(today);
+    const from = new Date(today); from.setDate(from.getDate() - days);
+    range.from = localYmd(from);
   }
   postFilter.offset = 0; posts = null; load(true);
 }
@@ -318,23 +319,27 @@ async function postsView() {
   const total = posts.total || 0;
   const page = Math.floor(postFilter.offset / postFilter.limit) + 1;
   const pages = Math.max(1, Math.ceil(total / postFilter.limit));
-  const sortLabel = { view: 'view', date: 'ngày', er: 'ER' };
+  const sortLabel = { view: 'view', like: 'like', comment: 'comment', save: 'save', share: 'share', date: 'ngày đăng', er: 'ER', viral: 'viral' };
+  const masters = D.masters || {};
+  const options = (id, values) => `<datalist id="${id}">${[...new Set((values || []).map(x => x.name || x).filter(Boolean))].map(value => `<option value="${esc(value)}"></option>`).join('')}</datalist>`;
   return rangeBar() + `<div class="panel"><h2>Bài đăng <small>${fmt(total)} bài</small></h2>
     <div class="filters">
       <input id="pq" placeholder="🔍 Tìm brand/kênh/NV/link" value="${esc(postFilter.q)}">
-      <input id="pbrand" placeholder="Brand chứa..." value="${esc(postFilter.brand)}">
-      <input id="pchannel" placeholder="Kênh (chính xác)" value="${esc(postFilter.channel)}">
-      <input id="pstaff" placeholder="Nhân sự (chính xác)" value="${esc(postFilter.staff)}">
+      <input id="pbrand" list="brandOptions" placeholder="Thương hiệu chứa…" value="${esc(postFilter.brand)}">
+      <input id="pchannel" list="channelOptions" placeholder="Kênh chính xác" value="${esc(postFilter.channel)}">
+      <input id="pstaff" list="staffOptions" placeholder="Nhân sự chính xác" value="${esc(postFilter.staff)}">
+      ${options('brandOptions', masters.brands)}${options('channelOptions', masters.channels)}${options('staffOptions', masters.staff)}
       <select id="psort">${Object.entries(sortLabel).map(([k, v]) => `<option value="${k}" ${postFilter.sort === k ? 'selected' : ''}>Sort ${v}</option>`).join('')}</select>
       <select id="pdir"><option value="desc" ${postFilter.dir === 'desc' ? 'selected' : ''}>Giảm dần</option><option value="asc" ${postFilter.dir === 'asc' ? 'selected' : ''}>Tăng dần</option></select>
       <button class="button primary" id="pApply">Lọc</button>
     </div>
-    ${table(posts.rows, [
-      [r => fmtDate(r.posted_date) + dateFlag(r.posted_date), 'Ngày'], ['brand_text_raw', 'Brand'], ['channel_name', 'Kênh'], ['owner_name', 'NV'],
-      [r => fmt(r.realtime_view), 'View'], [r => fmt(r.realtime_like), 'Like'], [r => fmt(r.realtime_share), 'Share'], [r => pct(r.engagement_rate), 'ER'],
-      [r => r.viral_label ? '<span class="pill">🔥 Viral</span>' : '', 'Viral'], [r => r.bonus_amount ? fmt(r.bonus_amount) + 'đ' : '', 'Bonus'],
+    <div class="posts-table">${table(posts.rows, [
+      [r => fmtDate(r.posted_date) + dateFlag(r.posted_date), 'Ngày đăng'], [r => esc(r.brand_names || r.brand_text_raw || '(Chưa tag brand)'), 'Thương hiệu'], ['channel_name', 'Kênh'], ['owner_name', 'Phụ trách'],
+      [r => fmt(r.realtime_view), 'View'], [r => fmt(r.realtime_like), 'Like'], [r => fmt(r.realtime_comment), 'Cmt'], [r => fmt(r.realtime_save), 'Save'], [r => fmt(r.realtime_share), 'Share'], [r => pct(r.engagement_rate), 'ER'],
+      [r => r.viral_label ? `<span class="pill" title="${esc(r.viral_label)}">${esc(r.viral_label)}</span>` : '<span class="muted">—</span>', 'Viral'],
+      [r => r.is_exclusive ? '<span class="pill mid">Độc quyền</span>' : '<span class="muted">—</span>', 'Độc quyền'], [r => r.bonus_amount ? fmt(r.bonus_amount) + 'đ' : '', 'Bonus'],
       [r => r.post_url ? `<a href="${esc(r.post_url)}" target="_blank" rel="noopener">Mở ↗</a>` : '', 'Link']
-    ])}
+    ])}</div>
     <div class="pager"><span>Trang <b>${page}/${pages}</b></span>
       <button id="pPrev" ${page <= 1 ? 'disabled' : ''}>‹ Trước</button>
       <button id="pNext" ${page >= pages ? 'disabled' : ''}>Sau ›</button>

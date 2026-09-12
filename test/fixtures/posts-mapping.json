@@ -1,0 +1,33 @@
+{
+  "source": {
+    "NGÀY ĐĂNG BÀI": "12/09/2026",
+    "TÊN THƯƠNG HIỆU": "Dalat Time, Dalat Review",
+    "TÊN KÊNH": "Dalat Time TikTok",
+    "NGƯỜI PHỤ TRÁCH": "NV-042",
+    "LINK BÀI ĐĂNG": "https://example.com/posts/42?utm_source=sheet",
+    "VIEW": "10.000",
+    "LIKE": "400",
+    "COMMENT": "30",
+    "SAVE": "20",
+    "SHARE": "50",
+    "ĐỘC QUYỀN": "Có",
+    "VIRAL": "Viral",
+    "THƯỞNG VIRAL": "500.000"
+  },
+  "expected": {
+    "posted_date": "2026-09-12",
+    "brand_text_raw": "Dalat Time, Dalat Review",
+    "channel_name": "Dalat Time TikTok",
+    "owner_name": "NV-042",
+    "post_url": "https://example.com/posts/42?utm_source=sheet",
+    "realtime_view": 10000,
+    "realtime_like": 400,
+    "realtime_comment": 30,
+    "realtime_save": 20,
+    "realtime_share": 50,
+    "engagement_rate": 0.05,
+    "is_exclusive": true,
+    "viral_label": "Viral",
+    "bonus_amount": 500000
+  }
+}

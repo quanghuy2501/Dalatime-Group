@@ -80,7 +80,7 @@ export async function getReportPosts(db, clientCode, params = {}) {
   const offset = Math.max(Number(params.offset) || 0, 0);
   const countVals = vals.slice();
   vals.push(limit, offset);
-  const rows = db.query(`select p.posted_date, (select string_agg(distinct pbl.brand_name, ', ' order by pbl.brand_name)
+  const rows = db.query(`select p.posted_date::text as posted_date, (select string_agg(distinct pbl.brand_name, ', ' order by pbl.brand_name)
       from post_brands_sheet pbl join brands bl on lower(trim(bl.name))=lower(trim(pbl.brand_name))
       where pbl.raw_sheet_row_key=p.row_key and bl.active=true and bl.client_code=$1) as brand_names,
     p.channel_name, p.post_url,
