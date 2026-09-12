@@ -6,7 +6,7 @@
   "scripts": {
     "audit:local": "node scripts/audit-local-csv.mjs",
     "import:local": "node scripts/import-local-csv.mjs",
-    "check": "python3 -m compileall -q automation scripts/master_snapshot.py python_tests && node --check scripts/audit-local-csv.mjs && node --check scripts/import-local-csv.mjs && node --check src/server.mjs && node --check src/auth.mjs && node --check src/report/config.mjs && node --check src/report/queries.mjs && node --check src/report/routes.mjs && node --check src/importers/liveMaster.mjs && node --check src/importers/lockedSnapshot.mjs && node --check src/ingestion/directNv.mjs && node --check src/ingestion/directNvRunner.mjs && node --check scripts/direct-nv-sync.mjs && node --check src/reconciliation/currentWatermarkParity.mjs && node --check scripts/current-watermark-parity.mjs && node --check scripts/final-locked-snapshot-import.mjs && node --check scripts/phase1-import-master-to-db.mjs && node --check scripts/run-readonly-sync-cycle.mjs",
+    "check": "python3 -m compileall -q automation scripts/master_snapshot.py python_tests && node --check scripts/audit-local-csv.mjs && node --check scripts/import-local-csv.mjs && node --check src/server.mjs && node --check src/auth.mjs && node --check src/report/config.mjs && node --check src/report/queries.mjs && node --check src/report/routes.mjs && node --check src/importers/liveMaster.mjs && node --check src/importers/lockedSnapshot.mjs && node --check src/ingestion/directNv.mjs && node --check src/ingestion/directNvRunner.mjs && node --check scripts/direct-nv-sync.mjs && node --check scripts/seed-nv-sources.mjs && node --check src/reconciliation/currentWatermarkParity.mjs && node --check scripts/current-watermark-parity.mjs && node --check scripts/final-locked-snapshot-import.mjs && node --check scripts/phase1-import-master-to-db.mjs && node --check scripts/run-readonly-sync-cycle.mjs",
     "test": "node --test",
     "portal:token": "node scripts/generate-report-token.mjs",
     "portal:activate-active": "node scripts/activate-report-tokens.mjs",
@@ -17,6 +17,7 @@
     "api:smoke": "node scripts/api-smoke.mjs",
     "sync:readonly": "node scripts/run-readonly-sync-cycle.mjs",
     "sync:nv": "node scripts/direct-nv-sync.mjs",
+    "seed:nv-sources": "node scripts/seed-nv-sources.mjs",
     "migrate:nv": "node scripts/migrate-direct-nv.mjs",
     "phase3:verify-staging": "node --env-file=.env.local scripts/phase3-verify-staging.mjs",
     "phase3:diff": "node --env-file=.env.local scripts/phase3-diff-staging-vs-production.mjs",
