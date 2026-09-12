@@ -29,6 +29,14 @@ npm run phase4:export
 npm run phase4:parity -- --snapshot reports/phase4/master-snapshot-complete-<UTC-stamp>.json
 ```
 
+The one-shot final locked import is pinned to the 2026-09-11 snapshot run and content fingerprint. It validates source row counts, normalizes title/instruction/header/empty/invalid rows, takes a mode-0600 SQL snapshot of only the six public mirror tables plus `sync_runs`, and replaces those mirrors under a transaction-scoped advisory lock. In-transaction SELECT parity and a customer metric query must pass or all database writes roll back:
+
+```sh
+npm run final:db-import
+```
+
+Do not substitute another snapshot path. The command fails closed on any run ID, fingerprint, dimension, count, schema, lock, database, or parity error. The SQL backup under `reports/backups/` uses `json_populate_recordset` and does not require `pg_dump` (PostgreSQL 17 compatible).
+
 The parity gate removes title, instruction, header, empty, and invalid schema/status rows. It compares valid client/staff/channel/brand records, distinct canonical `post_url` values, and distinct canonical `(post_url, brand)` values. Reports under `reports/phase4/current-watermark-parity-*.{json,md}` contain the source run ID and watermark, counts, latency, and complete missing/extra lists. A missing source/DB snapshot or any real distinct-key difference blocks publication and DB repair.
 
 The underlying CLI is `python3 scripts/master_snapshot.py`. Use `snapshot --fixture-dir DIR --output FILE` (or `snapshot --live --output FILE`) and `audit --master FILE --against FILE --json FILE --md FILE` for direct automation.

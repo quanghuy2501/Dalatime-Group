@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-12T01:56:28.332Z",
+  "source": {
+    "path": "reports/phase4/master-snapshot-complete-20260911T152206Z.json",
+    "run_id": "ee554ffc-519d-4e58-8228-1bcbbaa89d82",
+    "sha256": "f293c3e518a27b9e0f22c3656cf606d45402f21a4fef399730d5501821ee0464",
+    "source_counts": {
+      "clients": 149,
+      "staff": 998,
+      "channels": 157,
+      "brands": 174,
+      "raw_data": 5065,
+      "normalized": 65296,
+      "config": 12,
+      "sync_log": 951
+    },
+    "canonical_counts": {
+      "clients": 145,
+      "staff": 36,
+      "channels": 152,
+      "brands": 170,
+      "raw_data": 5019,
+      "normalized": 65170
+    }
+  },
+  "duration_ms": 55081,
+  "before_counts": {
+    "clients": 143,
+    "staff": 37,
+    "channels": 148,
+    "brands": 168,
+    "posts_raw_sheet": 4931,
+    "post_brands_sheet": 63163,
+    "sync_runs": 11
+  },
+  "after_counts": {
+    "clients": 145,
+    "staff": 36,
+    "channels": 152,
+    "brands": 170,
+    "posts_raw_sheet": 5028,
+    "post_brands_sheet": 65170,
+    "sync_runs": 12
+  },
+  "backup_path": "reports/backups/final-db-import-before-20260912T015533251Z.sql",
+  "transaction": {
+    "advisory_lock": true,
+    "committed": true,
+    "sync_run_id": "1df40f1e-5060-47ca-8700-41a5636cd887"
+  },
+  "parity": {
+    "clients": {
+      "master_count": 145,
+      "database_count": 145,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 0
+      }
+    },
+    "staff": {
+      "master_count": 36,
+      "database_count": 36,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 958
+      }
+    },
+    "channels": {
+      "master_count": 152,
+      "database_count": 152,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 1
+      }
+    },
+    "brands": {
+      "master_count": 170,
+      "database_count": 170,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 0
+      }
+    },
+    "raw_data": {
+      "master_count": 5019,
+      "database_count": 5019,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 33
+      }
+    },
+    "normalized": {
+      "master_count": 65170,
+      "database_count": 65170,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 33
+      }
+    }
+  },
+  "customer_report_metric_smoke": {
+    "client_code": "KH0001",
+    "overview": {
+      "posts": 1373,
+      "view": "15196041",
+      "likes": "431411",
+      "comments": "4824",
+      "saves": "174050",
+      "shares": "117924",
+      "interactions": "728209",
+      "er": "4.79209683627465864300",
+      "viral": 158,
+      "exclusive": 67,
+      "date_from": "2026-05-03T17:00:00.000Z",
+      "date_to": "2029-07-28T17:00:00.000Z",
+      "active_channels": 166
+    }
+  },
+  "smoke": {
+    "select_parity": "pass",
+    "customer_report_metric": "pass",
+    "health_ready_api": "pass",
+    "http_status": {
+      "/healthz": 200,
+      "/readyz": 200,
+      "/api/status": 200,
+      "/api/overview": 200,
+      "/api/brands?limit=3": 200,
+      "/api/staff?limit=3": 200,
+      "/api/channels?limit=3": 200,
+      "/api/posts?limit=3": 200
+    }
+  },
+  "publish_allowed": true,
+  "status": "complete",
+  "blocker": null
+}

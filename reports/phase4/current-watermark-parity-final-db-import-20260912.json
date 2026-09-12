@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "kind": "current-watermark-parity",
+  "run_id": "e60edc95-2afd-4bf7-ba2f-8a97c37d64c5",
+  "generated_at": "2026-09-12T01:57:26.497Z",
+  "read_only": true,
+  "google_writes": false,
+  "database_writes": false,
+  "watermark": {
+    "drive_modified_time": "2026-09-11T09:55:59.098Z",
+    "captured_at": "2026-09-11T15:22:06.816895Z",
+    "run_id": "ee554ffc-519d-4e58-8228-1bcbbaa89d82"
+  },
+  "master_snapshot": {
+    "file": "reports/phase4/master-snapshot-complete-20260911T152206Z.json",
+    "run_id": "ee554ffc-519d-4e58-8228-1bcbbaa89d82",
+    "sha256": "f293c3e518a27b9e0f22c3656cf606d45402f21a4fef399730d5501821ee0464"
+  },
+  "verdict": "pass",
+  "publish_allowed": true,
+  "counts": {
+    "clients": {
+      "master": 145,
+      "database": 145,
+      "missing": 0,
+      "extra": 0
+    },
+    "staff": {
+      "master": 36,
+      "database": 36,
+      "missing": 0,
+      "extra": 0
+    },
+    "channels": {
+      "master": 152,
+      "database": 152,
+      "missing": 0,
+      "extra": 0
+    },
+    "brands": {
+      "master": 170,
+      "database": 170,
+      "missing": 0,
+      "extra": 0
+    },
+    "raw_data": {
+      "master": 5019,
+      "database": 5019,
+      "missing": 0,
+      "extra": 0
+    },
+    "normalized": {
+      "master": 65170,
+      "database": 65170,
+      "missing": 0,
+      "extra": 0
+    }
+  },
+  "latency_ms": {
+    "master_normalization": 792,
+    "database_select": 3803,
+    "total": 4811
+  },
+  "checks": {
+    "clients": {
+      "master_count": 145,
+      "database_count": 145,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 0
+      }
+    },
+    "staff": {
+      "master_count": 36,
+      "database_count": 36,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 958
+      }
+    },
+    "channels": {
+      "master_count": 152,
+      "database_count": 152,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 1
+      }
+    },
+    "brands": {
+      "master_count": 170,
+      "database_count": 170,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 0
+      }
+    },
+    "raw_data": {
+      "master_count": 5019,
+      "database_count": 5019,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 33
+      }
+    },
+    "normalized": {
+      "master_count": 65170,
+      "database_count": 65170,
+      "missing_count": 0,
+      "extra_count": 0,
+      "missing": [],
+      "extra": [],
+      "dropped_sheet_rows": {
+        "before_or_header": 4,
+        "empty": 0,
+        "invalid_schema_or_status": 33
+      }
+    }
+  },
+  "repair": {
+    "performed": false,
+    "reason": "No repair required."
+  }
+}

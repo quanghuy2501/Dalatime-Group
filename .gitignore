@@ -5,3 +5,4 @@ config/report-customers.local.json
 .runtime/
 *.py[cod]
 __pycache__/
+reports/backups/
