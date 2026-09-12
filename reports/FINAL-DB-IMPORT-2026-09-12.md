@@ -20,6 +20,10 @@
 
 None.
 
+## Completion event
+
+The requested `openclaw system event` was attempted after the successful push, but this environment has no `openclaw` executable (`zsh: command not found: openclaw`). This does not affect the completed database import or `publish_allowed` verdict.
+
 ## Verification
 
 - Locked source validation: **pass**

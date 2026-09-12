@@ -164,5 +164,10 @@
   },
   "publish_allowed": true,
   "status": "complete",
-  "blocker": null
+  "blocker": null,
+  "completion_event": {
+    "status": "blocked",
+    "command": "openclaw system event --text \"Done: final locked snapshot import task completed or truthfully blocked; inspect repo report\" --mode now",
+    "error": "zsh: command not found: openclaw"
+  }
 }
