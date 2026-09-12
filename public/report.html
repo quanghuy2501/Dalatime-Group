@@ -1,1 +1,333 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Báo cáo khách hàng</title><style>:root{--ink:#172033;--muted:#64748b;--line:#e2e8f0;--bg:#f5f7fb;--card:#fff;--green:#5d9f47;--green2:#e9f5e4;--shadow:0 8px 24px #17203312}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px Inter,system-ui,sans-serif}main{max-width:1320px;margin:auto;padding:18px 22px 32px}header,.panel,.kpi{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:14px}header{padding:18px 22px;margin-bottom:12px;display:flex;justify-content:space-between;gap:20px;align-items:center}h1{margin:0 0 4px;font-size:clamp(20px,2.2vw,28px);line-height:1.15}.muted{color:var(--muted)}.sync{text-align:right}.filters{padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px}.filters label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:700}.filters input,.filters select,.filters button{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:#fff}.filters button{background:var(--green);border-color:var(--green);color:#fff;font-weight:800;cursor:pointer}.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.kpi{padding:14px 16px}.kpi b{display:block;color:var(--muted);font-size:11px;text-transform:uppercase}.kpi strong{display:block;font-size:23px;margin-top:5px}.grid{display:block;width:100%}.panel{padding:16px;margin-bottom:12px}.panel h2{font-size:16px;margin:0 0 14px}.chart{height:220px;display:flex;align-items:flex-end;gap:3px;border-bottom:1px solid var(--line);padding-top:10px}.bar{flex:1;min-width:3px;background:linear-gradient(180deg,var(--green),#b8dca9);border-radius:4px 4px 0 0}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:900px}th,td{font-size:12px}th:nth-child(n+6),td:nth-child(n+6){text-align:right}th:nth-child(3),td:nth-child(3){text-align:center}th,td{padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:left}th{background:#f7faf5;color:#4b6750;font-size:11px;text-transform:uppercase}td.num{text-align:right;font-variant-numeric:tabular-nums}a{color:#2563eb}.tag{display:inline-block;border-radius:99px;padding:3px 7px;font-size:11px;font-weight:800;background:var(--green2);color:#317025}.empty{text-align:center;padding:50px;color:var(--muted)}.pager{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:12px}.pager button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px}@media(max-width:950px){main{padding:12px}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}header{display:block}.sync{text-align:left;margin-top:10px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:480px){.kpis{grid-template-columns:1fr}}</style></head><body><main id="app"><div class="empty">Đang tải báo cáo…</div></main><script>const token=location.pathname.split('/').filter(Boolean)[1],base='/api/report/'+encodeURIComponent(token),state={from:'',to:'',brand:'',channel:''};let status,page=0;const limit=25;const esc=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));const n=x=>Number(x||0).toLocaleString('vi-VN'),p=x=>Number(x||0).toFixed(2)+'%';const safe=u=>{try{let x=new URL(u);return /^https?:$/.test(x.protocol)?esc(x.href):''}catch{return''}};function q(extra={}){let x=new URLSearchParams({...state,...extra});for(let [k,v] of x)if(!v)x.delete(k);return x}async function api(e,x={}){let r=await fetch(base+'/'+e+'?'+q(x),{cache:'no-store'});if(!r.ok)throw Error(r.status===404?'Liên kết không hợp lệ':'Không tải được báo cáo');return r.json()}function opts(a,v){return(a||[]).map(x=>`<option ${x===v?'selected':''}>${esc(x)}</option>`).join('')}function filters(){return`<section class="panel filters"><label>TỪ NGÀY<input id="from" type="date" value="${state.from}"></label><label>ĐẾN NGÀY<input id="to" type="date" value="${state.to}"></label><label>THƯƠNG HIỆU<select id="brand"><option value="">Tất cả</option>${opts(status.brands,state.brand)}</select></label><label>KÊNH<select id="channel"><option value="">Tất cả</option>${opts(status.channels,state.channel)}</select></label><button onclick="apply()">Áp dụng</button></section>`}function metric(a,b){return`<div class="kpi"><b>${a}</b><strong>${b}</strong></div>`}function chart(rows){let m=Math.max(1,...rows.map(x=>+x.view));return`<div class="chart">${rows.map(x=>`<div class="bar" style="height:${Math.max(2,+x.view/m*175)}px" title="${esc(x.date)} · ${n(x.view)} view"></div>`).join('')}</div>`}function table(d){return`<section class="panel"><h2>Danh sách bài đăng <span class="muted">· ${n(d.total)} bài</span></h2><div class="table-wrap"><table><thead><tr><th>Ngày đăng</th><th>Tên kênh</th><th>Link bài đăng</th><th>Viral</th><th>View</th><th>Like</th><th>Comment</th><th>Save</th><th>Share</th><th>% tương tác</th></tr></thead><tbody>${d.rows.map(r=>`<tr><td>${r.posted_date?new Date(r.posted_date).toLocaleDateString('vi-VN'):''}</td><td>${esc(r.channel_name)}</td><td>${safe(r.post_url)?`${r.is_exclusive?'<span class="tag" title="Bài độc quyền">◆</span> ':''}<a href="${safe(r.post_url)}" target="_blank" rel="noopener">Mở bài</a>`:''}</td><td>${r.viral_label?'<span class="tag">🔥 Viral</span>':''}</td><td class="num">${n(r.realtime_view)}</td><td class="num">${n(r.realtime_like)}</td><td class="num">${n(r.realtime_comment)}</td><td class="num">${n(r.realtime_save)}</td><td class="num">${n(r.realtime_share)}</td><td class="num">${p(r.engagement_rate)}</td></tr>`).join('')||'<tr><td colspan="10" class="empty">Không có dữ liệu</td></tr>'}</tbody></table></div><div class="pager"><button ${page===0?'disabled':''} onclick="page--;load()">‹ Trước</button><span class="muted">Trang ${page+1}/${Math.max(1,Math.ceil(d.total/limit))}</span><button ${(page+1)*limit>=d.total?'disabled':''} onclick="page++;load()">Sau ›</button></div></section>`}async function apply(){state.from=from.value;state.to=to.value;state.brand=brand.value;state.channel=channel.value;page=0;load()}async function load(){try{let[o,t,d]=await Promise.all([api('overview'),api('timeseries'),api('posts',{limit,offset:page*limit})]);document.getElementById('app').innerHTML=`<header><div><div class="muted">DALAT TIME · BÁO CÁO KHÁCH HÀNG</div><h1>${esc(status.customerName)}</h1><div class="muted">Báo cáo số liệu theo dữ liệu đã đồng bộ</div></div><div class="sync muted">CẬP NHẬT LẦN CUỐI<br><b>${status.lastSyncAt?new Date(status.lastSyncAt).toLocaleString('vi-VN'):'Chưa có'}</b></div></header>${filters()}<section class="kpis">${metric('Tổng bài đã đăng',n(o.posts))}${metric('🔥 Số bài viral',n(o.viral))}${metric('🏆 Số bài độc quyền',n(o.exclusive))}${metric('Tổng số view',n(o.view))}${metric('Tổng số like',n(o.likes))}${metric('Tổng số comment',n(o.comments))}${metric('Tổng số save',n(o.saves))}${metric('Tổng số share',n(o.shares))}${metric('Tỷ lệ tương tác',p(o.er))}</section><div class="grid"><section class="panel"><h2>Xu hướng lượt xem theo ngày đăng</h2>${t.length?chart(t):'<div class="empty">Chưa có dữ liệu trong khoảng này</div>'}</section></div>${table(d)}`}catch(e){document.getElementById('app').innerHTML=`<div class="empty">${esc(e.message)}</div>`}}(async()=>{try{status=await api('status');load()}catch(e){document.getElementById('app').innerHTML=`<div class="empty">${esc(e.message)}</div>`}})();</script></body></html>
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Báo cáo khách hàng</title>
+    <style>
+      :root {
+        --ink: #172033;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --bg: #f5f7fb;
+        --card: #fff;
+        --green: #5d9f47;
+        --green2: #e9f5e4;
+        --shadow: 0 8px 24px #17203312;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px Inter,
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1320px;
+        margin: auto;
+        padding: 18px 22px 32px;
+      }
+      header,
+      .panel,
+      .kpi {
+        background: var(--card);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+        border-radius: 14px;
+      }
+      header {
+        padding: 18px 22px;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: center;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: clamp(20px, 2.2vw, 28px);
+        line-height: 1.15;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .sync {
+        text-align: right;
+      }
+      .filters {
+        padding: 12px 16px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: end;
+        margin-bottom: 14px;
+      }
+      .filters label {
+        display: grid;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .filters input,
+      .filters select,
+      .filters button {
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0 10px;
+        background: #fff;
+      }
+      .filters button {
+        background: var(--green);
+        border-color: var(--green);
+        color: #fff;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .kpi {
+        padding: 14px 16px;
+      }
+      .kpi b {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      .kpi strong {
+        display: block;
+        font-size: 23px;
+        margin-top: 5px;
+      }
+      .grid {
+        display: block;
+        width: 100%;
+      }
+      .panel {
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+      .panel h2 {
+        font-size: 16px;
+        margin: 0 0 14px;
+      }
+      .chart {
+        height: 220px;
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        border-bottom: 1px solid var(--line);
+        padding-top: 10px;
+      }
+      .bar {
+        flex: 1;
+        min-width: 3px;
+        background: linear-gradient(180deg, var(--green), #b8dca9);
+        border-radius: 4px 4px 0 0;
+      }
+      .table-wrap {
+        overflow: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        min-width: 900px;
+      }
+      th,
+      td {
+        font-size: 12px;
+      }
+      th:nth-child(n + 6),
+      td:nth-child(n + 6) {
+        text-align: right;
+      }
+      th:nth-child(3),
+      td:nth-child(3) {
+        text-align: center;
+      }
+      th,
+      td {
+        padding: 9px 8px;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+        text-align: left;
+      }
+      th {
+        background: #f7faf5;
+        color: #4b6750;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      a {
+        color: #2563eb;
+      }
+      .tag {
+        display: inline-block;
+        border-radius: 99px;
+        padding: 3px 7px;
+        font-size: 11px;
+        font-weight: 800;
+        background: var(--green2);
+        color: #317025;
+      }
+      .empty {
+        text-align: center;
+        padding: 50px;
+        color: var(--muted);
+      }
+      .pager {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        align-items: center;
+        margin-top: 12px;
+      }
+      .pager button {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+      @media (max-width: 950px) {
+        main {
+          padding: 12px;
+        }
+        .kpis {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        header {
+          display: block;
+        }
+        .sync {
+          text-align: left;
+          margin-top: 10px;
+        }
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 480px) {
+        .kpis {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app"><div class="empty">Đang tải báo cáo…</div></main>
+    <script>
+      const token = location.pathname.split("/").filter(Boolean)[1],
+        base = "/api/report/" + encodeURIComponent(token),
+        state = { from: "", to: "", brand: "", channel: "" };
+      let status,
+        page = 0;
+      const limit = 25;
+      const esc = (s) =>
+        String(s ?? "").replace(
+          /[<>&"']/g,
+          (c) =>
+            ({
+              "<": "&lt;",
+              ">": "&gt;",
+              "&": "&amp;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const n = (x) => Number(x || 0).toLocaleString("vi-VN"),
+      p = (x) => {
+        const value = Number(x || 0);
+        const ratio = Math.abs(value) > 1 ? value / 100 : value;
+        return (ratio * 100).toFixed(2) + "%";
+      };
+      const safe = (u) => {
+        try {
+          let x = new URL(u);
+          return /^https?:$/.test(x.protocol) ? esc(x.href) : "";
+        } catch {
+          return "";
+        }
+      };
+      function q(extra = {}) {
+        let x = new URLSearchParams({ ...state, ...extra });
+        for (let [k, v] of x) if (!v) x.delete(k);
+        return x;
+      }
+      async function api(e, x = {}) {
+        let r = await fetch(base + "/" + e + "?" + q(x), { cache: "no-store" });
+        if (!r.ok)
+          throw Error(
+            r.status === 404
+              ? "Liên kết không hợp lệ"
+              : "Không tải được báo cáo",
+          );
+        return r.json();
+      }
+      function opts(a, v) {
+        return (a || [])
+          .map((x) => `<option ${x === v ? "selected" : ""}>${esc(x)}</option>`)
+          .join("");
+      }
+      function filters() {
+        return `<section class="panel filters"><label>TỪ NGÀY<input id="from" type="date" value="${state.from}"></label><label>ĐẾN NGÀY<input id="to" type="date" value="${state.to}"></label><label>THƯƠNG HIỆU<select id="brand"><option value="">Tất cả</option>${opts(status.brands, state.brand)}</select></label><label>KÊNH<select id="channel"><option value="">Tất cả</option>${opts(status.channels, state.channel)}</select></label><button onclick="apply()">Áp dụng</button></section>`;
+      }
+      function metric(a, b) {
+        return `<div class="kpi"><b>${a}</b><strong>${b}</strong></div>`;
+      }
+      function chart(rows) {
+        let m = Math.max(1, ...rows.map((x) => +x.view));
+        return `<div class="chart">${rows.map((x) => `<div class="bar" style="height:${Math.max(2, (+x.view / m) * 175)}px" title="${esc(x.date)} · ${n(x.view)} view"></div>`).join("")}</div>`;
+      }
+      function table(d) {
+        return `<section class="panel"><h2>Danh sách bài đăng <span class="muted">· ${n(d.total)} bài</span></h2><div class="table-wrap"><table><thead><tr><th>Ngày đăng</th><th>Tên kênh</th><th>Link bài đăng</th><th>Viral</th><th>View</th><th>Like</th><th>Comment</th><th>Save</th><th>Share</th><th>% tương tác</th></tr></thead><tbody>${d.rows.map((r) => `<tr><td>${r.posted_date ? new Date(r.posted_date).toLocaleDateString("vi-VN") : ""}</td><td>${esc(r.channel_name)}</td><td>${safe(r.post_url) ? `${r.is_exclusive ? '<span class="tag" title="Bài độc quyền">◆</span> ' : ""}<a href="${safe(r.post_url)}" target="_blank" rel="noopener">Mở bài</a>` : ""}</td><td>${r.viral_label ? '<span class="tag">🔥 Viral</span>' : ""}</td><td class="num">${n(r.realtime_view)}</td><td class="num">${n(r.realtime_like)}</td><td class="num">${n(r.realtime_comment)}</td><td class="num">${n(r.realtime_save)}</td><td class="num">${n(r.realtime_share)}</td><td class="num">${p(r.engagement_rate)}</td></tr>`).join("") || '<tr><td colspan="10" class="empty">Không có dữ liệu</td></tr>'}</tbody></table></div><div class="pager"><button ${page === 0 ? "disabled" : ""} onclick="page--;load()">‹ Trước</button><span class="muted">Trang ${page + 1}/${Math.max(1, Math.ceil(d.total / limit))}</span><button ${(page + 1) * limit >= d.total ? "disabled" : ""} onclick="page++;load()">Sau ›</button></div></section>`;
+      }
+      async function apply() {
+        state.from = from.value;
+        state.to = to.value;
+        state.brand = brand.value;
+        state.channel = channel.value;
+        page = 0;
+        load();
+      }
+      async function load() {
+        try {
+          let [o, t, d] = await Promise.all([
+            api("overview"),
+            api("timeseries"),
+            api("posts", { limit, offset: page * limit }),
+          ]);
+          document.getElementById("app").innerHTML =
+            `<header><div><div class="muted">DALAT TIME · BÁO CÁO KHÁCH HÀNG</div><h1>${esc(status.customerName)}</h1><div class="muted">Báo cáo số liệu theo dữ liệu đã đồng bộ</div></div><div class="sync muted">CẬP NHẬT LẦN CUỐI<br><b>${status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString("vi-VN") : "Chưa có"}</b></div></header>${filters()}<section class="kpis">${metric("Tổng bài đã đăng", n(o.posts))}${metric("🔥 Số bài viral", n(o.viral))}${metric("🏆 Số bài độc quyền", n(o.exclusive))}${metric("Tổng số view", n(o.view))}${metric("Tổng số like", n(o.likes))}${metric("Tổng số comment", n(o.comments))}${metric("Tổng số save", n(o.saves))}${metric("Tổng số share", n(o.shares))}${metric("Tỷ lệ tương tác", p(o.er))}</section><div class="grid"><section class="panel"><h2>Xu hướng lượt xem theo ngày đăng</h2>${t.length ? chart(t) : '<div class="empty">Chưa có dữ liệu trong khoảng này</div>'}</section></div>${table(d)}`;
+        } catch (e) {
+          document.getElementById("app").innerHTML =
+            `<div class="empty">${esc(e.message)}</div>`;
+        }
+      }
+      (async () => {
+        try {
+          status = await api("status");
+          load();
+        } catch (e) {
+          document.getElementById("app").innerHTML =
+            `<div class="empty">${esc(e.message)}</div>`;
+        }
+      })();
+    </script>
+  </body>
+</html>

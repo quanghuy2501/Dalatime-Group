@@ -1,6 +1,6 @@
 import path from 'path';
 import { readCsv, nonEmptyRows } from '../utils/csv.mjs';
-import { parseNumberVN, parseBoolVN, parseDateAny, sha256, normalizeUrl, splitBrands } from '../utils/normalize.mjs';
+import { parseNumberVN, parseBoolVN, parseDateAny, sha256, normalizeUrl, splitBrands, engagementRateFromMetrics } from '../utils/normalize.mjs';
 
 export const ROOT = '/Users/quanghuy/Projects/tui-mo-dashboard';
 
@@ -37,6 +37,10 @@ export function parseRawRows() {
     const channel = String(o['TÊN KÊNH'] ?? '').trim();
     const sourceFile = String(o['LINK FILE'] ?? '').trim();
     const urlKey = normalizeUrl(postUrl) || `${sourceFile}:${o.__row}`;
+    const metrics = {
+      view: Math.round(parseNumberVN(o['VIEW'])), like: Math.round(parseNumberVN(o['LIKE'])),
+      comment: Math.round(parseNumberVN(o['COMMENT'])), save: Math.round(parseNumberVN(o['SAVE'])), share: Math.round(parseNumberVN(o['SHARE']))
+    };
     return {
       dedupe_key: sha256(`${urlKey}|${postedDate ?? ''}|${channel}`),
       source_file_id: sourceFile,
@@ -48,17 +52,17 @@ export function parseRawRows() {
       owner_name: String(o['NGƯỜI PHỤ TRÁCH'] ?? '').trim(),
       is_exclusive: parseBoolVN(o['ĐỘC QUYỀN']),
       viral_label: String(o['VIRAL'] ?? '').trim(),
-      realtime_view: Math.round(parseNumberVN(o['VIEW'])),
-      realtime_like: Math.round(parseNumberVN(o['LIKE'])),
-      realtime_comment: Math.round(parseNumberVN(o['COMMENT'])),
-      realtime_save: Math.round(parseNumberVN(o['SAVE'])),
-      realtime_share: Math.round(parseNumberVN(o['SHARE'])),
+      realtime_view: metrics.view,
+      realtime_like: metrics.like,
+      realtime_comment: metrics.comment,
+      realtime_save: metrics.save,
+      realtime_share: metrics.share,
       snapshot_view: Math.round(parseNumberVN(o['VIEW_SNAPSHOOT'])),
       snapshot_like: Math.round(parseNumberVN(o['LIKE_SNAPSHOOT'])),
       snapshot_comment: Math.round(parseNumberVN(o['COMMENT_SNAPSHOOT'])),
       snapshot_save: Math.round(parseNumberVN(o['SAVE_SNAPSHOOT'])),
       snapshot_share: Math.round(parseNumberVN(o['SHARE_SNAPSHOOT'])),
-      engagement_rate: parseNumberVN(o['% TƯƠNG TÁC']),
+      engagement_rate: engagementRateFromMetrics(metrics),
       status: String(o['TRẠNG THÁI'] ?? '').trim(),
       bonus_amount: parseNumberVN(o['THƯỞNG VIRAL']),
       show_channel: String(o['SHOW TÊN KÊNH'] ?? '').trim(),

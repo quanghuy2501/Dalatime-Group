@@ -9,6 +9,24 @@ export function parseNumberVN(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// ER is a decimal ratio in application and database layers. At boundaries,
+// tolerate legacy percentage points so 0.0482 and 4.82 both mean 4.82%.
+export function normalizeEngagementRate(value) {
+  const n = typeof value === 'number' ? value : parseNumberVN(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.abs(n) > 1 ? n / 100 : n;
+}
+
+export function engagementRateFromMetrics({ view = 0, like = 0, comment = 0, save = 0, share = 0 } = {}) {
+  const views = Number(view) || 0;
+  if (views <= 0) return 0;
+  return [like, comment, save, share].reduce((sum, value) => sum + (Number(value) || 0), 0) / views;
+}
+
+export function formatEngagementPercent(value, digits = 2) {
+  return `${(normalizeEngagementRate(value) * 100).toFixed(digits)}%`;
+}
+
 export function parseBoolVN(v) {
   const s = String(v ?? '').trim().toLowerCase();
   return ['có','co','true','1','x','yes','y'].includes(s);

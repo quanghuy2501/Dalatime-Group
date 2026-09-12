@@ -7,7 +7,7 @@ select
   coalesce(sum(realtime_save),0)::bigint as save,
   coalesce(sum(realtime_share),0)::bigint as share,
   coalesce(sum(realtime_like + realtime_comment + realtime_save + realtime_share),0)::bigint as interactions,
-  case when coalesce(sum(realtime_view),0) > 0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) * 100 else 0 end as er,
+  case when coalesce(sum(realtime_view),0) > 0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) else 0 end as er,
   count(*) filter (where coalesce(viral_label,'') <> '')::int as viral,
   count(*) filter (where is_exclusive)::int as exclusive,
   count(distinct nullif(channel_name,''))::int as active_channels,
@@ -22,7 +22,7 @@ select
   count(*)::int as posts,
   coalesce(sum(pb.realtime_view),0)::bigint as view,
   coalesce(sum(pb.realtime_like + pb.realtime_comment + pb.realtime_save + pb.realtime_share),0)::bigint as interactions,
-  case when coalesce(sum(pb.realtime_view),0)>0 then sum(pb.realtime_like + pb.realtime_comment + pb.realtime_save + pb.realtime_share)::numeric / sum(pb.realtime_view) * 100 else 0 end as er,
+  case when coalesce(sum(pb.realtime_view),0)>0 then sum(pb.realtime_like + pb.realtime_comment + pb.realtime_save + pb.realtime_share)::numeric / sum(pb.realtime_view) else 0 end as er,
   count(*) filter (where coalesce(pb.viral_label,'') <> '')::int as viral,
   max(pb.posted_date) as last_posted_date
 from post_brands pb
@@ -34,7 +34,7 @@ select
   count(*)::int as posts,
   coalesce(sum(realtime_view),0)::bigint as view,
   coalesce(sum(realtime_like + realtime_comment + realtime_save + realtime_share),0)::bigint as interactions,
-  case when coalesce(sum(realtime_view),0)>0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) * 100 else 0 end as er,
+  case when coalesce(sum(realtime_view),0)>0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) else 0 end as er,
   count(*) filter (where coalesce(viral_label,'') <> '')::int as viral,
   coalesce(sum(br.amount),0)::bigint as bonus_amount,
   max(posted_date) as last_posted_date
@@ -48,7 +48,7 @@ select
   count(*)::int as posts,
   coalesce(sum(realtime_view),0)::bigint as view,
   coalesce(sum(realtime_like + realtime_comment + realtime_save + realtime_share),0)::bigint as interactions,
-  case when coalesce(sum(realtime_view),0)>0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) * 100 else 0 end as er,
+  case when coalesce(sum(realtime_view),0)>0 then sum(realtime_like + realtime_comment + realtime_save + realtime_share)::numeric / sum(realtime_view) else 0 end as er,
   count(*) filter (where coalesce(viral_label,'') <> '')::int as viral,
   max(posted_date) as last_posted_date
 from posts_raw

@@ -19,7 +19,7 @@ export async function getOverview(db, params = {}) {
     coalesce(sum(p.realtime_save),0)::bigint as save,
     coalesce(sum(p.realtime_share),0)::bigint as share,
     coalesce(sum(${interactionsSql('p')}),0)::bigint as interactions,
-    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric / sum(p.realtime_view) * 100 else 0 end as er,
+    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric / sum(p.realtime_view) else 0 end as er,
     count(*) filter (where coalesce(p.viral_label,'') <> '')::int as viral,
     count(*) filter (where p.is_exclusive)::int as exclusive,
     count(distinct nullif(p.channel_name,''))::int as active_channels,
@@ -37,7 +37,7 @@ async function grouped(db, table, alias, keySql, params, limit = 50) {
     count(*)::int as posts,
     coalesce(sum(${alias}.realtime_view),0)::bigint as view,
     coalesce(sum(${interactionsSql(alias)}),0)::bigint as interactions,
-    case when coalesce(sum(${alias}.realtime_view),0)>0 then sum(${interactionsSql(alias)})::numeric / sum(${alias}.realtime_view) * 100 else 0 end as er,
+    case when coalesce(sum(${alias}.realtime_view),0)>0 then sum(${interactionsSql(alias)})::numeric / sum(${alias}.realtime_view) else 0 end as er,
     count(*) filter (where coalesce(${alias}.viral_label,'') <> '')::int as viral,
     max(${alias}.posted_date) as last_posted_date
     from ${table} ${alias}
@@ -58,7 +58,7 @@ export async function getTopStaff(db, limit = 50, params = {}) {
   const sql = `select coalesce(nullif(p.owner_name,''),'(Chưa gán)') as staff_name,
     count(*)::int as posts, coalesce(sum(p.realtime_view),0)::bigint as view,
     coalesce(sum(${interactionsSql('p')}),0)::bigint as interactions,
-    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric/sum(p.realtime_view)*100 else 0 end as er,
+    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric/sum(p.realtime_view) else 0 end as er,
     count(*) filter (where coalesce(p.viral_label,'') <> '')::int as viral,
     coalesce(sum(p.bonus_amount),0)::bigint as bonus_amount,
     max(p.posted_date) as last_posted_date
@@ -156,7 +156,7 @@ export async function getTimeseries(db, params = {}) {
     count(*)::int as posts,
     coalesce(sum(p.realtime_view),0)::bigint as view,
     coalesce(sum(${interactionsSql('p')}),0)::bigint as interactions,
-    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric / sum(p.realtime_view) * 100 else 0 end as er,
+    case when coalesce(sum(p.realtime_view),0)>0 then sum(${interactionsSql('p')})::numeric / sum(p.realtime_view) else 0 end as er,
     count(*) filter (where coalesce(p.viral_label,'') <> '')::int as viral
     from posts_raw_sheet p
     where p.posted_date is not null ${where.length ? 'and ' + where.join(' and ') : ''}

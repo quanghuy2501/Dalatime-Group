@@ -1,7 +1,7 @@
 // Onicorn Admin Dashboard — reads existing /api/* endpoints only. No Google/DB writes happen here.
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toLocaleString('vi-VN');
-const pct = n => Number(n || 0).toFixed(2) + '%';
+const pct = n => { const x = Number(n || 0); return ((Math.abs(x) > 1 ? x / 100 : x) * 100).toFixed(2) + '%'; };
 const esc = s => String(s ?? '').replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = s => { if (!s) return ''; const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(s).slice(0, 10); };

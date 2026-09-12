@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { GoogleApi } from '../google/googleApi.mjs';
-import { parseBoolVN, parseDateAny, parseNumberVN, normalizeUrl, splitBrands } from '../utils/normalize.mjs';
+import { parseBoolVN, parseDateAny, parseNumberVN, normalizeUrl, splitBrands, engagementRateFromMetrics } from '../utils/normalize.mjs';
 
 export const NV_SHEET = 'BAO CAO HANG NGAY';
 export const INACTIVE_NV = new Set(['NV15', 'NV16']);
@@ -46,13 +46,14 @@ export function normalizeNvRow(values, source, sourceRow, configVersion, mapping
   if (!postedDate || !url || !channel || !brand) throw new Error(`invalid required value at ${source.nv_id} row ${sourceRow}`);
   const rowKey = hash(`${url}|${postedDate}|${channel.toLocaleLowerCase('und')}`);
   const number = key => Math.round(parseNumberVN(raw[key]));
+  const metrics = { view:number('VIEW'), like:number('LIKE'), comment:number('COMMENT'), save:number('SAVE'), share:number('SHARE') };
   const mapped = { row_key:rowKey, source_file_id:source.google_file_id, source_row:sourceRow, posted_date:postedDate,
     raw_posted_date:clean(raw['NGÀY ĐĂNG BÀI']), posted_date_parse_ok:true, brand_text_raw:brand, channel_name:channel,
     post_url:clean(raw['LINK BÀI ĐĂNG']), owner_name:clean(raw['NGƯỜI PHỤ TRÁCH']), is_exclusive:parseBoolVN(raw['ĐỘC QUYỀN']),
-    viral_label:clean(raw.VIRAL), realtime_view:number('VIEW'), realtime_like:number('LIKE'), realtime_comment:number('COMMENT'),
-    realtime_save:number('SAVE'), realtime_share:number('SHARE'), snapshot_view:number('VIEW_SNAPSHOOT'), snapshot_like:number('LIKE_SNAPSHOOT'),
+    viral_label:clean(raw.VIRAL), realtime_view:metrics.view, realtime_like:metrics.like, realtime_comment:metrics.comment,
+    realtime_save:metrics.save, realtime_share:metrics.share, snapshot_view:number('VIEW_SNAPSHOOT'), snapshot_like:number('LIKE_SNAPSHOOT'),
     snapshot_comment:number('COMMENT_SNAPSHOOT'), snapshot_save:number('SAVE_SNAPSHOOT'), snapshot_share:number('SHARE_SNAPSHOOT'),
-    engagement_rate:parseNumberVN(raw['% TƯƠNG TÁC']), status:clean(raw['TRẠNG THÁI']), bonus_amount:parseNumberVN(raw['THƯỞNG VIRAL']),
+    engagement_rate:engagementRateFromMetrics(metrics), status:clean(raw['TRẠNG THÁI']), bonus_amount:parseNumberVN(raw['THƯỞNG VIRAL']),
     show_channel:clean(raw['SHOW TÊN KÊNH']), viral_confirm_date:parseDateAny(raw['NGÀY XÁC NHẬN VIRAL']),
     source_hash:hash(JSON.stringify(values.slice(0,22))), raw_values:values.slice(0,22), config_version:configVersion };
   return { row_key:rowKey, nv_id:source.nv_id, source_file_id:source.google_file_id, source_sheet_name:source.sheet_name,

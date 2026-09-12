@@ -56,7 +56,7 @@ export async function getReportOverview(db, clientCode, params = {}) {
     coalesce(sum(p.realtime_save),0)::bigint as saves,
     coalesce(sum(p.realtime_share),0)::bigint as shares,
     coalesce(sum(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0)),0)::bigint as interactions,
-    case when coalesce(sum(p.realtime_view),0)>0 then sum(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0))::numeric/sum(p.realtime_view)*100 else 0 end as er,
+    case when coalesce(sum(p.realtime_view),0)>0 then sum(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0))::numeric/sum(p.realtime_view) else 0 end as er,
     count(*) filter (where coalesce(p.viral_label,'')<>'')::int as viral,
     count(*) filter (where coalesce(p.is_exclusive,false))::int as exclusive,
     min(p.posted_date)::date as date_from,
