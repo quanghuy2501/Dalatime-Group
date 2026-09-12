@@ -1,15 +1,19 @@
 import { getServiceAccountAccessToken } from './serviceAccountAuth.mjs';
 
 export class GoogleApi {
-  constructor({ minDelayMs = 1250, maxRetries = 5 } = {}) {
+  constructor({ minDelayMs = 1250, maxRetries = 5, scopes = [
+    'https://www.googleapis.com/auth/spreadsheets.readonly',
+    'https://www.googleapis.com/auth/drive.metadata.readonly'
+  ] } = {}) {
     this.minDelayMs = minDelayMs;
     this.maxRetries = maxRetries;
     this.lastAt = 0;
     this.accessToken = null;
     this.serviceAccountEmail = null;
+    this.scopes = scopes;
   }
   async init() {
-    const auth = await getServiceAccountAccessToken();
+    const auth = await getServiceAccountAccessToken({ scopes: this.scopes });
     this.accessToken = auth.accessToken;
     this.serviceAccountEmail = auth.serviceAccountEmail;
     this.projectId = auth.projectId;
@@ -38,9 +42,12 @@ export class GoogleApi {
       const text = await res.text();
       let json; try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
       if (res.ok) return json;
-      const retryAfter = Number(res.headers.get('retry-after') || 0);
+      const retryHeader = res.headers.get('retry-after');
+      const retrySeconds = Number(retryHeader);
+      const retryDateMs = retryHeader && !Number.isFinite(retrySeconds) ? Date.parse(retryHeader) - Date.now() : 0;
       if ((res.status === 429 || res.status >= 500) && attempt < this.maxRetries) {
-        const backoff = retryAfter ? retryAfter * 1000 : Math.min(60000, 2000 * Math.pow(2, attempt));
+        const backoff = Number.isFinite(retrySeconds) && retrySeconds > 0 ? retrySeconds * 1000
+          : retryDateMs > 0 ? retryDateMs : Math.min(60000, 2000 * Math.pow(2, attempt));
         await new Promise(r => setTimeout(r, backoff));
         continue;
       }

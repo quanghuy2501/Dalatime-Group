@@ -1,0 +1,29 @@
+{
+  "description": "Example only. Prefer nv_ingestion_sources in production. Never put the Master spreadsheet ID here.",
+  "sources": [
+    {"nv_id":"NV01","google_file_id":"employee-sheet-01","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV02","google_file_id":"employee-sheet-02","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV03","google_file_id":"employee-sheet-03","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV04","google_file_id":"employee-sheet-04","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV05","google_file_id":"employee-sheet-05","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV06","google_file_id":"employee-sheet-06","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV07","google_file_id":"employee-sheet-07","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV08","google_file_id":"employee-sheet-08","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV09","google_file_id":"employee-sheet-09","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV10","google_file_id":"employee-sheet-10","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV11","google_file_id":"employee-sheet-11","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV12","google_file_id":"employee-sheet-12","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV13","google_file_id":"employee-sheet-13","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV14","google_file_id":"employee-sheet-14","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV15","google_file_id":"employee-sheet-15","sheet_name":"BAO CAO HANG NGAY","active":false,"expected_columns":22},
+    {"nv_id":"NV16","google_file_id":"employee-sheet-16","sheet_name":"BAO CAO HANG NGAY","active":false,"expected_columns":22},
+    {"nv_id":"NV17","google_file_id":"employee-sheet-17","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV18","google_file_id":"employee-sheet-18","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV19","google_file_id":"employee-sheet-19","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV20","google_file_id":"employee-sheet-20","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV21","google_file_id":"employee-sheet-21","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV22","google_file_id":"employee-sheet-22","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV23","google_file_id":"employee-sheet-23","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22},
+    {"nv_id":"NV24","google_file_id":"employee-sheet-24","sheet_name":"BAO CAO HANG NGAY","active":true,"expected_columns":22}
+  ]
+}

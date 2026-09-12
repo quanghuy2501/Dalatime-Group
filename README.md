@@ -18,6 +18,8 @@ npm run check
 
 No command in this folder writes to Google Drive/Sheets unless explicitly implemented under `src/exporters` and run with a write flag.
 
+Production employee data is ingested directly and read-only from the active NV files with `npm run sync:nv`; see [docs/direct-nv-ingestion.md](docs/direct-nv-ingestion.md). This stages and atomically publishes to the existing exact mirror while preserving the existing Master sync as registry/configuration only. There is no manual snapshot publication path for NV ingestion.
+
 ## Safe read-only sync
 
 `npm run sync:readonly` creates an atomic, locked Master snapshot under `reports/phase4` from the repository's extracted CSV fixtures. It never invokes an importer, SQL, or a Google write API. Set `MASTER_FIXTURE_DIR` to use another fixture directory. Live export is explicitly opt-in with `READONLY_LIVE=1` plus `GOOGLE_APPLICATION_CREDENTIALS`; the exporter requests only Sheets read-only and Drive metadata read-only scopes, reads each sheet in bounded row ranges (500 rows by default), and retries HTTP 429 responses with backoff. It spools each completed sheet atomically and does not lock or fingerprint the final snapshot until every sheet has been processed. Set `READONLY_COMPARISON_SNAPSHOT` to emit JSON and Markdown discrepancy audits by post URL, post URL/brand, and staff ID/status.

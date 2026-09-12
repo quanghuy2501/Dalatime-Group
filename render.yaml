@@ -36,6 +36,29 @@ services:
 
   # Scheduled, pay-per-run automation. No always-on worker or persistent disk.
   - type: cron
+    name: Dalatime-Group-direct-nv-ingestion
+    runtime: node
+    region: singapore
+    schedule: "*/30 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run sync:nv
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: INACTIVE_STAFF_IDS
+        value: NV15,NV16
+      - key: NV_CONCURRENCY
+        value: "3"
+      - key: NV_PAGE_ROWS
+        value: "500"
+
+  - type: cron
     name: Dalatime-Group-report-batch
     runtime: python
     region: singapore

@@ -29,7 +29,9 @@ def verify(blueprint: dict) -> None:
     if len(names) != len(set(names)):
         raise ValueError("service names must be unique")
     web = next((service for service in services if service.get("type") == "web"), None)
-    automation = next((service for service in services if service.get("type") in {"worker", "cron"}), None)
+    automations = [service for service in services if service.get("type") in {"worker", "cron"}]
+    automation = next((service for service in automations if "report-batch" in str(service.get("name", ""))), None)
+    nv_ingestion = next((service for service in automations if "direct-nv-ingestion" in str(service.get("name", ""))), None)
     if not web or web.get("healthCheckPath") != "/healthz":
         raise ValueError("web service must preserve /healthz")
     if not automation:
@@ -45,6 +47,16 @@ def verify(blueprint: dict) -> None:
             raise ValueError(f"automation env is missing {key}")
     if automation.get("type") == "worker" and not automation.get("disk"):
         raise ValueError("persistent worker requires durable state disk")
+    if not nv_ingestion or nv_ingestion.get("type") != "cron":
+        raise ValueError("direct NV ingestion cron is required")
+    if str(nv_ingestion.get("startCommand", "")) != "npm run sync:nv":
+        raise ValueError("direct NV cron must use the production sync:nv CLI")
+    nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
+    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID", "INACTIVE_STAFF_IDS"):
+        if key not in nv_env:
+            raise ValueError(f"direct NV env is missing {key}")
+    if int(nv_env.get("NV_CONCURRENCY", {}).get("value", 99)) > 3:
+        raise ValueError("direct NV concurrency exceeds three")
 
 
 def main() -> int:
