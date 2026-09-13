@@ -14,7 +14,8 @@ export const COLUMN_MAPPING = Object.freeze([
   ['TRẠNG THÁI','status'], ['THƯỞNG VIRAL','bonus_amount'], ['SHOW TÊN KÊNH','show_channel'], ['NGÀY XÁC NHẬN VIRAL','viral_confirm_date']
 ]);
 
-const clean = value => String(value ?? '').trim();
+const clean = value => String(value ?? '').replace(/^\\uFEFF/, '').trim();
+const normalizeHeader = value => clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleUpperCase('und').replace(/[\s_]+/g, ' ').trim();
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const inactiveSet = () => new Set([...INACTIVE_NV, ...clean(process.env.INACTIVE_STAFF_IDS).split(',').map(x => x.trim().toUpperCase()).filter(Boolean)]);
@@ -29,9 +30,10 @@ export function validateMapping(mapping = COLUMN_MAPPING) {
 
 export function resolveHeader(row, mapping = COLUMN_MAPPING) {
   validateMapping(mapping);
-  const actual = (row || []).map(clean);
-  if (actual.length !== 22 || mapping.some(([name], i) => actual[i] !== name)) {
-    throw new Error(`mapping mismatch: sheet must contain the exact ordered 22-column header`);
+  const actual = (row || []).slice(0, 22).map(normalizeHeader);
+  const expected = mapping.map(([name]) => normalizeHeader(name));
+  if (actual.length !== 22 || actual.some((value, i) => value !== expected[i])) {
+    throw new Error(`mapping mismatch: sheet must contain the ordered 22-column header`);
   }
   return true;
 }
@@ -101,14 +103,19 @@ export async function readSource(api, source, { pageRows=500, checkpoint=async()
   const meta = await api.spreadsheetMeta(source.google_file_id);
   const sheet = (meta.sheets || []).find(x => x.properties?.title === source.sheet_name);
   if (!sheet) throw new Error(`${source.nv_id}: missing ${source.sheet_name}`);
-  const total = Number(sheet.properties.gridProperties?.rowCount || 0); const rows=[]; let headerSeen=false;
+  const total = Number(sheet.properties.gridProperties?.rowCount || 0); const rows=[]; let headerSeen=false; let headerRow=0;
   for (let start=1; start<=total; start+=pageRows) {
     const end=Math.min(total,start+pageRows-1); const safe=source.sheet_name.replaceAll("'", "''");
     const page=(await api.values(source.google_file_id, `'${safe}'!A${start}:V${end}`)).values || [];
     for (let i=0; i<page.length; i++) {
-      const sheetRow=start+i; const values=page[i];
-      if (!headerSeen) { if (clean(values[0]) === COLUMN_MAPPING[0][0]) { resolveHeader(values); headerSeen=true; } continue; }
-      if (values.some(v => clean(v))) rows.push({ values, sourceRow:sheetRow });
+      const sheetRow=start+i; const values=page[i] || [];
+      if (!headerSeen) {
+        // Employee sheets have title/instruction rows before the real header (normally row 5).
+        // Search the full ordered A:V signature rather than assuming row 1.
+        try { resolveHeader(values); headerSeen=true; headerRow=sheetRow; } catch { /* keep scanning */ }
+        continue;
+      }
+      if (values.some(v => clean(v))) rows.push({ values:values.slice(0, 22), sourceRow:sheetRow });
     }
     await checkpoint({ source, nextRow:end+1, rowsRead:rows.length, status:'running' });
   }

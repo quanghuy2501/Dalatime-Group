@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GoogleApi } from '../src/google/googleApi.mjs';
-import { COLUMN_MAPPING, collectNvRows, discoverSources, normalizeNvRow, resolveHeader } from '../src/ingestion/directNv.mjs';
+import { COLUMN_MAPPING, collectNvRows, discoverSources, normalizeNvRow, readSource, resolveHeader } from '../src/ingestion/directNv.mjs';
 import { runDirectNvIngestion } from '../src/ingestion/directNvRunner.mjs';
 
 const header=COLUMN_MAPPING.map(x=>x[0]);
@@ -18,6 +18,15 @@ test('fixture registry has 20-30 entries and preserves/skips inactive NV15/NV16'
   const prior=process.env.INACTIVE_STAFF_IDS; process.env.INACTIVE_STAFF_IDS='NV15,NV16';
   try { const active=await discoverSources({},file); assert.equal(active.length,22); assert.ok(active.every(x=>!['NV15','NV16'].includes(x.nv_id))); }
   finally { if(prior===undefined) delete process.env.INACTIVE_STAFF_IDS; else process.env.INACTIVE_STAFF_IDS=prior; }
+});
+
+test('finds real employee header at row 5 and preserves data source row numbers',async()=>{
+  const source={nv_id:'NV05',google_file_id:'file-5',sheet_name:'BAO CAO HANG NGAY'};
+  const title=['BÁO CÁO NHÂN VIÊN'];
+  const instruction=['Nhập dữ liệu từ dòng bên dưới'];
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:6}}}]}),values:async()=>({values:[title,instruction,[],['Tháng 09/2026'],header.map((h,i)=>i===0?' ngày đăng bài ':h),data(5)]})};
+  const rows=await readSource(api,source);
+  assert.equal(rows.length,1); assert.equal(rows[0].sourceRow,6); assert.deepEqual(rows[0].values,data(5));
 });
 
 test('exact 22-column mapping and stable idempotency key',()=>{
