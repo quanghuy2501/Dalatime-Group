@@ -132,19 +132,21 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
     try {
       const input = await readSource(api,source,{pageRows,checkpoint});
       const valid = []; const skipped = [];
+      let identityRows = 0;
       for (const row of input) {
         // Real employee sheets contain hundreds of preformatted/template rows after the
         // header. They may have formulas or validation metadata in non-required columns,
         // but no actual post identity. Do not count those intentional blanks as malformed.
         const hasRequiredIdentity = row.values.slice(0, 4).some(value => clean(value));
         if (!hasRequiredIdentity) continue;
+        identityRows += 1;
         try { valid.push(normalizeNvRow(row.values,source,row.sourceRow,configVersion)); }
         catch (error) { skipped.push(rowDiagnostic(error,row.sourceRow,row.values)); }
       }
       const ratio = input.length ? skipped.length / input.length : 0;
       // A readable sheet with the exact header and no employee rows is an intentional
       // empty source (common for staff who have not reported yet), not a failure.
-      if (!valid.length && input.length === 0) {
+      if (!valid.length && identityRows === 0) {
         await checkpoint({source,nextRow:1,rowsRead:0,status:'empty',error:JSON.stringify({message:'empty valid NV source; no employee rows'}).slice(0,2000)});
         return {empty:true, source};
       }
