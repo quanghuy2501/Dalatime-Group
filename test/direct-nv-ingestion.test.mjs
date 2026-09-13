@@ -29,6 +29,15 @@ test('finds real employee header at row 5 and preserves data source row numbers'
   assert.equal(rows.length,1); assert.equal(rows[0].sourceRow,6); assert.deepEqual(rows[0].values,data(5));
 });
 
+test('ignores preformatted blank/template rows when calculating malformed ratio',async()=>{
+  const source={nv_id:'NV01',google_file_id:'file-1',sheet_name:'BAO CAO HANG NGAY'};
+  const blank=Array(22).fill(''); const partial=Array(22).fill(''); partial[2]='TikTok';
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:8}}}]}),values:async()=>({values:[header,data(1),blank,blank,partial,blank,blank,blank]})};
+  const checkpoints=[]; const rows=await collectNvRows({api,sources:[source],configVersion:'master-v1',checkpoint:event=>{checkpoints.push(event)}});
+  assert.equal(rows.length,1); assert.equal(rows[0].source_row,2); assert.equal(checkpoints.at(-1).status,'ok');
+  assert.match(checkpoints.at(-1).error,/sourceRow/);
+});
+
 test('exact 22-column mapping and stable idempotency key',()=>{
   assert.equal(COLUMN_MAPPING.length,22); assert.equal(resolveHeader(header),true);
   assert.throws(()=>resolveHeader([...header.slice(0,21),'WRONG']),/mapping mismatch/);

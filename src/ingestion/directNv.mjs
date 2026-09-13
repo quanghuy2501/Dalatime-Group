@@ -133,6 +133,11 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       const input = await readSource(api,source,{pageRows,checkpoint});
       const valid = []; const skipped = [];
       for (const row of input) {
+        // Real employee sheets contain hundreds of preformatted/template rows after the
+        // header. They may have formulas or validation metadata in non-required columns,
+        // but no actual post identity. Do not count those intentional blanks as malformed.
+        const hasRequiredIdentity = row.values.slice(0, 4).some(value => clean(value));
+        if (!hasRequiredIdentity) continue;
         try { valid.push(normalizeNvRow(row.values,source,row.sourceRow,configVersion)); }
         catch (error) { skipped.push(rowDiagnostic(error,row.sourceRow,row.values)); }
       }
