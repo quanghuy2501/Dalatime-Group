@@ -141,7 +141,13 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
         try { valid.push(normalizeNvRow(row.values,source,row.sourceRow,configVersion)); }
         catch (error) { skipped.push(rowDiagnostic(error,row.sourceRow,row.values)); }
       }
-      const ratio = input.length ? skipped.length / input.length : 1;
+      const ratio = input.length ? skipped.length / input.length : 0;
+      // A readable sheet with the exact header and no employee rows is an intentional
+      // empty source (common for staff who have not reported yet), not a failure.
+      if (!valid.length && input.length === 0) {
+        await checkpoint({source,nextRow:1,rowsRead:0,status:'empty',error:JSON.stringify({message:'empty valid NV source; no employee rows'}).slice(0,2000)});
+        return {empty:true, source};
+      }
       if (!valid.length || ratio > malformedLimit()) {
         const detail = { message: !valid.length ? 'no valid employee rows' : `malformed row ratio ${ratio.toFixed(3)} exceeds ${malformedLimit()}`, skipped };
         await checkpoint({source,nextRow:1,rowsRead:input.length,status:'fail',error:JSON.stringify(detail).slice(0,2000)});
@@ -151,10 +157,12 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       return valid;
     } catch(error) { await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(error.message).slice(0,2000)}); return {error}; }
   });
-  const failures=groups.filter(group=>!Array.isArray(group));
+  const failures=groups.filter(group=>group?.error);
   if(failures.length) throw new Error(`${failures.length} NV source(s) failed: ${failures.map(x=>x.error.message).join('; ')}`);
-  const rows=groups.flat(); const keys=new Set();
+  const empty=groups.filter(group=>group?.empty).length;
+  const rows=groups.filter(Array.isArray).flat(); const keys=new Set();
   for (const row of rows) { if (keys.has(row.row_key)) throw new Error(`duplicate idempotency key: ${row.row_key}`); keys.add(row.row_key); }
+  Object.defineProperty(rows,'diagnostics',{value:{active:sources.length-empty,empty,failed:0,total:sources.length},enumerable:false});
   return rows;
 }
 

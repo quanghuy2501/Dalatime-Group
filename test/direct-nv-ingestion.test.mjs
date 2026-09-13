@@ -38,6 +38,19 @@ test('ignores preformatted blank/template rows when calculating malformed ratio'
   assert.match(checkpoints.at(-1).error,/sourceRow/);
 });
 
+test('readable valid empty source is skipped with empty diagnostic',async()=>{
+  const source={nv_id:'NV13',google_file_id:'empty-13',sheet_name:'BAO CAO HANG NGAY'};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:3}}}]}),values:async()=>({values:[['Tiêu đề'],['Hướng dẫn'],header]})};
+  const checkpoints=[]; const rows=await collectNvRows({api,sources:[source],configVersion:'master-v1',checkpoint:e=>checkpoints.push(e)});
+  assert.equal(rows.length,0); assert.deepEqual(rows.diagnostics,{active:0,empty:1,failed:0,total:1}); assert.equal(checkpoints.at(-1).status,'empty');
+});
+
+test('empty sources do not hide zero-total fail-closed guard',async()=>{
+  const source={nv_id:'NV19',google_file_id:'empty-19',sheet_name:'BAO CAO HANG NGAY'};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:1}}}]}),values:async()=>({values:[header]})};
+  const rows=await collectNvRows({api,sources:[source],configVersion:'master-v1'}); assert.equal(rows.length,0);
+});
+
 test('exact 22-column mapping and stable idempotency key',()=>{
   assert.equal(COLUMN_MAPPING.length,22); assert.equal(resolveHeader(header),true);
   assert.throws(()=>resolveHeader([...header.slice(0,21),'WRONG']),/mapping mismatch/);

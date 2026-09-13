@@ -39,7 +39,7 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount)
   await db.query('begin');
   try {
     await db.query(`select pg_advisory_xact_lock(hashtext('onicorn:direct-nv-publish'))`);
-    const gate=(await db.query(`select count(*)::int total,count(*) filter(where status='ok')::int ok from nv_ingestion_checkpoints where run_id=$1`,[runId])).rows[0];
+    const gate=(await db.query(`select count(*)::int total,count(*) filter(where status in ('ok','empty'))::int ok from nv_ingestion_checkpoints where run_id=$1`,[runId])).rows[0];
     if (Number(gate.total)!==sourceCount || Number(gate.ok)!==sourceCount) throw new Error('source checkpoint gate failed');
     await db.query('delete from post_brands_sheet'); await db.query('delete from posts_raw_sheet');
     await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:30000});
@@ -79,6 +79,8 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
     const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,checkpoint:safeCheckpoint});
     await checkpointQueue;
     if (!rows.length) throw new Error('validation failed: active NV sources produced zero rows');
+    const diagnostics = rows.diagnostics || {active:sources.length,empty:0,failed:0,total:sources.length};
+    await db.query(`update sync_runs set meta=meta || $2 where id=$1`, [runId, json({source_counts:diagnostics})]);
     await db.query('begin');
     try {
       await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,maxParams:30000});
