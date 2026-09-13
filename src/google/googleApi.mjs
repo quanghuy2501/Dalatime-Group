@@ -8,6 +8,7 @@ export class GoogleApi {
     this.minDelayMs = minDelayMs;
     this.maxRetries = maxRetries;
     this.lastAt = 0;
+    this.turnQueue = Promise.resolve();
     this.accessToken = null;
     this.serviceAccountEmail = null;
     this.scopes = scopes;
@@ -20,10 +21,16 @@ export class GoogleApi {
     return this;
   }
   async waitTurn() {
-    const now = Date.now();
-    const wait = Math.max(0, this.lastAt + this.minDelayMs - now);
-    if (wait) await new Promise(r => setTimeout(r, wait));
-    this.lastAt = Date.now();
+    let release;
+    const previous = this.turnQueue;
+    this.turnQueue = new Promise(resolve => { release = resolve; });
+    await previous;
+    try {
+      const now = Date.now();
+      const wait = Math.max(0, this.lastAt + this.minDelayMs - now);
+      if (wait) await new Promise(r => setTimeout(r, wait));
+      this.lastAt = Date.now();
+    } finally { release(); }
   }
   async fetchJson(url, opts = {}) {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {

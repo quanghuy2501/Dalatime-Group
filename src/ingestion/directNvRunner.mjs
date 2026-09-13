@@ -57,7 +57,7 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount)
   } catch (error) { await db.query('rollback'); throw error; }
 }
 
-export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Number(process.env.NV_CONCURRENCY||3),pageRows=Number(process.env.NV_PAGE_ROWS||500),publisher=publishNvRows }={}) {
+export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Number(process.env.NV_CONCURRENCY||2),pageRows=Number(process.env.NV_PAGE_ROWS||500),publisher=publishNvRows }={}) {
   db ||= await connectDb(); let runId; let ownDb=!arguments[0]?.db;
   try {
     const config=await activeConfig(db); const sources=await discoverSources(db,registryFile);
@@ -69,7 +69,15 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
     runId=(await db.query(`insert into sync_runs(run_type,status,files_total,meta) values('direct_nv_ingestion','running',$1,$2) returning id`,
       [sources.length,json({read_only_google:true,config_version:config.version,source:'employee-sheets',master_as_data:false})])).rows[0].id;
     api ||= await createReadonlyApi();
-    const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,checkpoint:event=>checkpoint(db,runId,event)});
+    // pg Client permits only one query at a time. Serialize checkpoint writes while sheet reads remain concurrent.
+    let checkpointQueue = Promise.resolve();
+    const safeCheckpoint = event => {
+      const next = checkpointQueue.then(() => checkpoint(db,runId,event));
+      checkpointQueue = next.catch(() => {});
+      return next;
+    };
+    const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,checkpoint:safeCheckpoint});
+    await checkpointQueue;
     if (!rows.length) throw new Error('validation failed: active NV sources produced zero rows');
     await db.query('begin');
     try {

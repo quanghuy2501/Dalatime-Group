@@ -87,6 +87,16 @@ async function mapLimit(items, limit, fn) {
   return result;
 }
 
+const malformedLimit = () => {
+  const value = Number(process.env.NV_MAX_MALFORMED_RATIO ?? 0.5);
+  return Number.isFinite(value) && value >= 0 && value < 1 ? value : 0.5;
+};
+
+function rowDiagnostic(error, sourceRow, values) {
+  const reason = String(error?.message || error).slice(0, 500);
+  return { sourceRow, reason, raw: values.slice(0, 22) };
+}
+
 export async function readSource(api, source, { pageRows=500, checkpoint=async()=>{} }={}) {
   const meta = await api.spreadsheetMeta(source.google_file_id);
   const sheet = (meta.sheets || []).find(x => x.properties?.title === source.sheet_name);
@@ -107,12 +117,27 @@ export async function readSource(api, source, { pageRows=500, checkpoint=async()
   return rows;
 }
 
-export async function collectNvRows({ api, sources, configVersion, concurrency=3, pageRows=500, checkpoint }) {
+export async function collectNvRows({ api, sources, configVersion, concurrency=2, pageRows=500, checkpoint=async()=>{} }) {
   if (!configVersion) throw new Error('missing Master config_version');
-  if (concurrency < 1 || concurrency > 3) throw new Error('NV concurrency must be between 1 and 3');
+  if (concurrency < 1) throw new Error('NV concurrency must be at least 1');
+  concurrency = Math.min(2, concurrency);
   const groups=await mapLimit(sources, concurrency, async source => {
-    try { return (await readSource(api,source,{pageRows,checkpoint})).map(r=>normalizeNvRow(r.values,source,r.sourceRow,configVersion)); }
-    catch(error) { await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(error.message).slice(0,2000)}); return {error}; }
+    try {
+      const input = await readSource(api,source,{pageRows,checkpoint});
+      const valid = []; const skipped = [];
+      for (const row of input) {
+        try { valid.push(normalizeNvRow(row.values,source,row.sourceRow,configVersion)); }
+        catch (error) { skipped.push(rowDiagnostic(error,row.sourceRow,row.values)); }
+      }
+      const ratio = input.length ? skipped.length / input.length : 1;
+      if (!valid.length || ratio > malformedLimit()) {
+        const detail = { message: !valid.length ? 'no valid employee rows' : `malformed row ratio ${ratio.toFixed(3)} exceeds ${malformedLimit()}`, skipped };
+        await checkpoint({source,nextRow:1,rowsRead:input.length,status:'fail',error:JSON.stringify(detail).slice(0,2000)});
+        return {error:new Error(`${source.nv_id}: ${detail.message}`)};
+      }
+      if (skipped.length) await checkpoint({source,nextRow:1,rowsRead:input.length,status:'ok',error:JSON.stringify({skipped}).slice(0,2000)});
+      return valid;
+    } catch(error) { await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(error.message).slice(0,2000)}); return {error}; }
   });
   const failures=groups.filter(group=>!Array.isArray(group));
   if(failures.length) throw new Error(`${failures.length} NV source(s) failed: ${failures.map(x=>x.error.message).join('; ')}`);
