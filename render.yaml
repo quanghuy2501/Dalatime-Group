@@ -57,6 +57,18 @@ services:
         value: "3"
       - key: NV_PAGE_ROWS
         value: "500"
+      - key: NV_PAGE_TIMEOUT_MS
+        value: "120000"
+      - key: NV_SOURCE_TIMEOUT_MS
+        value: "120000"
+      - key: NV_TOTAL_TIMEOUT_MS
+        value: "1500000"
+      - key: NV_HEARTBEAT_MS
+        value: "30000"
+      - key: NV_SOURCE_RETRIES
+        value: "1"
+      - key: GOOGLE_REQUESTS_PER_MINUTE
+        value: "55"
 
   - type: cron
     name: Dalatime-Group-report-batch

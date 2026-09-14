@@ -18,6 +18,22 @@ const clean = value => String(value ?? '').replace(/^\\uFEFF/, '').trim();
 const normalizeHeader = value => clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleUpperCase('und').replace(/[\s_]+/g, ' ').trim();
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const positiveNumber = (value, fallback) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
+
+export class NvTimeoutError extends Error {
+  constructor(scope, timeoutMs) { super(`${scope} timed out after ${timeoutMs}ms`); this.name='NvTimeoutError'; this.code='NV_TIMEOUT'; }
+}
+
+export async function withTimeout(operation, timeoutMs, scope) {
+  timeoutMs=positiveNumber(timeoutMs,120000);
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_,reject)=>{ timer=setTimeout(()=>reject(new NvTimeoutError(scope,timeoutMs)),timeoutMs); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
 const inactiveSet = () => new Set([...INACTIVE_NV, ...clean(process.env.INACTIVE_STAFF_IDS).split(',').map(x => x.trim().toUpperCase()).filter(Boolean)]);
 
 export function validateMapping(mapping = COLUMN_MAPPING) {
@@ -99,14 +115,24 @@ function rowDiagnostic(error, sourceRow, values) {
   return { sourceRow, reason, raw: values.slice(0, 22) };
 }
 
-export async function readSource(api, source, { pageRows=500, checkpoint=async()=>{} }={}) {
-  const meta = await api.spreadsheetMeta(source.google_file_id);
+export async function readSource(api, source, { pageRows=500, pageTimeoutMs=120000, sourceTimeoutMs=120000,
+  checkpoint=async()=>{}, progress=()=>{}, cachedPages=new Map(), assertActive=()=>{}, deadlineAt=Infinity }={}) {
+  const remainingTimeout=configured=>Math.max(1,Math.min(configured,deadlineAt-Date.now()));
+  return withTimeout(async()=>{
+  assertActive();
+  const meta = await withTimeout(()=>api.spreadsheetMeta(source.google_file_id),remainingTimeout(pageTimeoutMs),`${source.nv_id} metadata`);
   const sheet = (meta.sheets || []).find(x => x.properties?.title === source.sheet_name);
   if (!sheet) throw new Error(`${source.nv_id}: missing ${source.sheet_name}`);
   const total = Number(sheet.properties.gridProperties?.rowCount || 0); const rows=[]; let headerSeen=false; let headerRow=0;
   for (let start=1; start<=total; start+=pageRows) {
+    assertActive();
     const end=Math.min(total,start+pageRows-1); const safe=source.sheet_name.replaceAll("'", "''");
-    const page=(await api.values(source.google_file_id, `'${safe}'!A${start}:V${end}`)).values || [];
+    const cacheKey=`${start}:${end}`; let page=cachedPages.get(cacheKey); let resumed=true;
+    if (!page) {
+      resumed=false;
+      page=(await withTimeout(()=>api.values(source.google_file_id, `'${safe}'!A${start}:V${end}`),remainingTimeout(pageTimeoutMs),`${source.nv_id} page ${start}-${end}`)).values || [];
+      cachedPages.set(cacheKey,page);
+    }
     for (let i=0; i<page.length; i++) {
       const sheetRow=start+i; const values=page[i] || [];
       if (!headerSeen) {
@@ -117,20 +143,25 @@ export async function readSource(api, source, { pageRows=500, checkpoint=async()
       }
       if (values.some(v => clean(v))) rows.push({ values:values.slice(0, 22), sourceRow:sheetRow });
     }
-    await checkpoint({ source, nextRow:end+1, rowsRead:rows.length, status:'running' });
+    await checkpoint({ source, pageStart:start, pageEnd:end, page, nextRow:end+1, rowsRead:rows.length, status:'running' });
+    progress({event:'page',nvId:source.nv_id,pageStart:start,pageEnd:end,rowsRead:rows.length,resumed});
   }
   if (!headerSeen) throw new Error(`${source.nv_id}: exact 22-column header not found`);
   await checkpoint({ source, nextRow:total+1, rowsRead:rows.length, status:'ok' });
   return rows;
+  },remainingTimeout(sourceTimeoutMs),`${source.nv_id} source`);
 }
 
-export async function collectNvRows({ api, sources, configVersion, concurrency=2, pageRows=500, checkpoint=async()=>{} }) {
+export async function collectNvRows({ api, sources, configVersion, concurrency=2, pageRows=500, pageTimeoutMs=120000,
+  sourceTimeoutMs=120000, sourceRetries=1, checkpoint=async()=>{}, progress=()=>{}, resumePages=()=>new Map(), assertActive=()=>{}, deadlineAt=Infinity }) {
   if (!configVersion) throw new Error('missing Master config_version');
   if (concurrency < 1) throw new Error('NV concurrency must be at least 1');
-  concurrency = Math.min(2, concurrency);
+  concurrency = Math.min(3, concurrency);
   const groups=await mapLimit(sources, concurrency, async source => {
-    try {
-      const input = await readSource(api,source,{pageRows,checkpoint});
+    let lastError;
+    for(let attempt=0;attempt<=sourceRetries;attempt++) try {
+      progress({event:'source',status:'running',nvId:source.nv_id,attempt:attempt+1});
+      const input = await readSource(api,source,{pageRows,pageTimeoutMs,sourceTimeoutMs,checkpoint,progress,cachedPages:await resumePages(source),assertActive,deadlineAt});
       const valid = []; const skipped = [];
       let identityRows = 0;
       for (const row of input) {
@@ -148,16 +179,24 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       // empty source (common for staff who have not reported yet), not a failure.
       if (!valid.length && identityRows === 0) {
         await checkpoint({source,nextRow:1,rowsRead:0,status:'empty',error:JSON.stringify({message:'empty valid NV source; no employee rows'}).slice(0,2000)});
+        progress({event:'source',status:'empty',nvId:source.nv_id,rows:0,attempt:attempt+1});
         return {empty:true, source};
       }
       if (!valid.length || ratio > malformedLimit()) {
         const detail = { message: !valid.length ? 'no valid employee rows' : `malformed row ratio ${ratio.toFixed(3)} exceeds ${malformedLimit()}`, skipped };
         await checkpoint({source,nextRow:1,rowsRead:input.length,status:'fail',error:JSON.stringify(detail).slice(0,2000)});
-        return {error:new Error(`${source.nv_id}: ${detail.message}`)};
+        throw new Error(`${source.nv_id}: ${detail.message}`);
       }
       if (skipped.length) await checkpoint({source,nextRow:1,rowsRead:input.length,status:'ok',error:JSON.stringify({skipped}).slice(0,2000)});
+      progress({event:'source',status:'ok',nvId:source.nv_id,rows:valid.length,attempt:attempt+1});
       return valid;
-    } catch(error) { await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(error.message).slice(0,2000)}); return {error}; }
+    } catch(error) {
+      lastError=error;
+      progress({event:'source',status:attempt<sourceRetries?'retrying':'fail',nvId:source.nv_id,attempt:attempt+1,error:String(error.message)});
+      if(attempt<sourceRetries) continue;
+    }
+    await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(lastError.message).slice(0,2000)});
+    return {error:lastError};
   });
   const failures=groups.filter(group=>group?.error);
   if(failures.length) throw new Error(`${failures.length} NV source(s) failed: ${failures.map(x=>x.error.message).join('; ')}`);
@@ -169,7 +208,9 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
 }
 
 export async function createReadonlyApi() {
-  return new GoogleApi({ minDelayMs:Number(process.env.GOOGLE_READ_DELAY_MS || 250), maxRetries:Number(process.env.GOOGLE_MAX_RETRIES || 6),
+  const quotaPerMinute=positiveNumber(process.env.GOOGLE_REQUESTS_PER_MINUTE,55);
+  const quotaDelayMs=Math.ceil(60000/Math.min(60,quotaPerMinute));
+  return new GoogleApi({ minDelayMs:Math.max(quotaDelayMs,Number(process.env.GOOGLE_READ_DELAY_MS || 0)), maxRetries:Number(process.env.GOOGLE_MAX_RETRIES || 6),
     scopes:['https://www.googleapis.com/auth/spreadsheets.readonly','https://www.googleapis.com/auth/drive.metadata.readonly'] }).init();
 }
 

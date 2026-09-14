@@ -55,8 +55,15 @@ def verify(blueprint: dict) -> None:
     for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID", "INACTIVE_STAFF_IDS"):
         if key not in nv_env:
             raise ValueError(f"direct NV env is missing {key}")
+    for key in ("NV_PAGE_TIMEOUT_MS", "NV_SOURCE_TIMEOUT_MS", "NV_TOTAL_TIMEOUT_MS", "NV_HEARTBEAT_MS", "NV_SOURCE_RETRIES", "GOOGLE_REQUESTS_PER_MINUTE"):
+        if key not in nv_env:
+            raise ValueError(f"direct NV runtime env is missing {key}")
     if int(nv_env.get("NV_CONCURRENCY", {}).get("value", 99)) > 3:
         raise ValueError("direct NV concurrency exceeds three")
+    if int(nv_env["GOOGLE_REQUESTS_PER_MINUTE"].get("value", 99)) > 60:
+        raise ValueError("direct NV Google request rate exceeds per-user quota")
+    if int(nv_env["NV_TOTAL_TIMEOUT_MS"].get("value", 0)) >= 30 * 60 * 1000:
+        raise ValueError("direct NV total timeout must be shorter than its 30-minute schedule")
 
 
 def main() -> int:

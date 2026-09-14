@@ -2,9 +2,8 @@
 import { runDirectNvIngestion } from '../src/ingestion/directNvRunner.mjs';
 
 try {
-  const result=await runDirectNvIngestion();
-  console.log(JSON.stringify({status:'published',...result},null,2));
+  await runDirectNvIngestion();
 } catch(error) {
-  console.error(JSON.stringify({status:'blocked',error:error.message,lastKnownGoodPreserved:true},null,2));
+  if(!error.nvFinalLogged) console.error(JSON.stringify({timestamp:new Date().toISOString(),job:'direct_nv_ingestion',event:'final',status:'blocked',error:error.message,lastKnownGoodPreserved:true}));
   process.exitCode=1;
 }

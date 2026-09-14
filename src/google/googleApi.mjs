@@ -1,5 +1,8 @@
 import { getServiceAccountAccessToken } from './serviceAccountAuth.mjs';
 
+let sharedLastAt=0;
+let sharedTurnQueue=Promise.resolve();
+
 export class GoogleApi {
   constructor({ minDelayMs = 1250, maxRetries = 5, scopes = [
     'https://www.googleapis.com/auth/spreadsheets.readonly',
@@ -7,8 +10,6 @@ export class GoogleApi {
   ] } = {}) {
     this.minDelayMs = minDelayMs;
     this.maxRetries = maxRetries;
-    this.lastAt = 0;
-    this.turnQueue = Promise.resolve();
     this.accessToken = null;
     this.serviceAccountEmail = null;
     this.scopes = scopes;
@@ -22,14 +23,14 @@ export class GoogleApi {
   }
   async waitTurn() {
     let release;
-    const previous = this.turnQueue;
-    this.turnQueue = new Promise(resolve => { release = resolve; });
+    const previous = sharedTurnQueue;
+    sharedTurnQueue = new Promise(resolve => { release = resolve; });
     await previous;
     try {
       const now = Date.now();
-      const wait = Math.max(0, this.lastAt + this.minDelayMs - now);
+      const wait = Math.max(0, sharedLastAt + this.minDelayMs - now);
       if (wait) await new Promise(r => setTimeout(r, wait));
-      this.lastAt = Date.now();
+      sharedLastAt = Date.now();
     } finally { release(); }
   }
   async fetchJson(url, opts = {}) {

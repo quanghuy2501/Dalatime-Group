@@ -76,6 +76,35 @@ test('Google reader honors Retry-After on HTTP 429 and stays GET-only',async()=>
   finally {global.fetch=original;}
 });
 
+test('hung Google page is bounded by the configured page timeout',async()=>{
+  const source={nv_id:'NV01',google_file_id:'hung',sheet_name:'BAO CAO HANG NGAY'};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:2}}}]}),values:async()=>new Promise(()=>{})};
+  await assert.rejects(readSource(api,source,{pageTimeoutMs:15,sourceTimeoutMs:100}),/page 1-2 timed out after 15ms/);
+});
+
+test('checkpoint page cache resumes completed pages and fetches only the missing page',async()=>{
+  const source={nv_id:'NV02',google_file_id:'resume',sheet_name:'BAO CAO HANG NGAY'}; const calls=[]; const events=[];
+  const cached=new Map([['1:2',[header,data(1)]]]);
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:4}}}]}),values:async(_id,range)=>{calls.push(range);return {values:[data(2),[]]};}};
+  const rows=await readSource(api,source,{pageRows:2,cachedPages:cached,progress:event=>events.push(event)});
+  assert.equal(rows.length,2); assert.equal(calls.length,1); assert.match(calls[0],/A3:V4/);
+  assert.deepEqual(events.map(event=>event.resumed),[true,false]);
+});
+
+test('runner emits page progress, heartbeat, and exactly one published final event',async()=>{
+  const one=[sources[0]]; const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-output-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify({sources:one}));
+  const events=[]; const db={end:async()=>{},query:async sql=>{
+    if(sql.includes('select c.version'))return {rows:[{version:'master-v1',mapping:COLUMN_MAPPING}]};
+    if(sql.includes('insert into sync_runs'))return {rows:[{id:'00000000-0000-0000-0000-000000000099'}]};
+    return {rows:[]};
+  }};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}),values:async()=>{await new Promise(resolve=>setTimeout(resolve,8));return {values:[header,data(1)]};}};
+  await runDirectNvIngestion({db,api,registryFile:file,heartbeatMs:2,log:event=>events.push(event),publisher:async()=>({rows:1})});
+  assert.ok(events.some(event=>event.event==='page'));
+  assert.ok(events.some(event=>event.event==='heartbeat'&&event.status==='running'));
+  assert.deepEqual(events.filter(event=>event.event==='final').map(event=>event.status),['published']);
+});
+
 test('34 active registry sources are accepted without a hard-coded upper bound',async()=>{
   const activeIds=[...Array.from({length:14},(_,i)=>i+1),...Array.from({length:20},(_,i)=>i+17)];
   const activeSources=activeIds.map((id,i)=>({nv_id:`NV${String(id).padStart(2,'0')}`,google_file_id:`active-file-${i+1}`,sheet_name:'BAO CAO HANG NGAY',active:true,expected_columns:22}));
@@ -86,18 +115,19 @@ test('34 active registry sources are accepted without a hard-coded upper bound',
     return {rows:[]};
   }};
   const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}),values:async id=>({values:[header,data(Number(id.split('-').pop()))]})};
-  const result=await runDirectNvIngestion({db,api,registryFile:file,publisher:async(_db,runId,_version,rows,sourceCount)=>({runId,rows:rows.length,sourceCount})});
+  const result=await runDirectNvIngestion({db,api,registryFile:file,log:()=>{},publisher:async(_db,runId,_version,rows,sourceCount)=>({runId,rows:rows.length,sourceCount})});
   assert.equal(result.sourceCount,34); assert.equal(result.rows,34);
 });
 
 test('partial source failure never invokes publisher and preserves prior publication',async()=>{
-  let published={run_id:'last-good'}; let publisherCalls=0;
+  let published={run_id:'last-good'}; let publisherCalls=0; const events=[];
   const registry={sources};const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-partial-'));const file=path.join(dir,'registry.json');fs.writeFileSync(file,JSON.stringify(registry));
   const db={end:async()=>{},query:async sql=>{
     if(sql.includes('select c.version'))return {rows:[{version:'master-v1',mapping:COLUMN_MAPPING}]};
     if(sql.includes('insert into sync_runs'))return {rows:[{id:'00000000-0000-0000-0000-000000000001'}]};
     return {rows:[]};}};
   const api={spreadsheetMeta:async id=>{if(id==='file-9')throw new Error('upstream partial failure');return {sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}},values:async id=>({values:[header,data(Number(id.split('-')[1]))]})};
-  await assert.rejects(runDirectNvIngestion({db,api,registryFile:file,publisher:async()=>{publisherCalls++;published={run_id:'bad'};}}),/partial failure/);
+  await assert.rejects(runDirectNvIngestion({db,api,registryFile:file,log:event=>events.push(event),publisher:async()=>{publisherCalls++;published={run_id:'bad'};}}),/partial failure/);
   assert.equal(publisherCalls,0);assert.deepEqual(published,{run_id:'last-good'});
+  assert.deepEqual(events.filter(event=>event.event==='final').map(event=>event.status),['blocked']);
 });

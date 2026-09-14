@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { connectDb, upsert } from '../db/postgres.mjs';
-import { COLUMN_MAPPING, collectNvRows, createReadonlyApi, discoverSources, splitBrands, validateMapping } from './directNv.mjs';
+import { COLUMN_MAPPING, NvTimeoutError, collectNvRows, createReadonlyApi, discoverSources, splitBrands, validateMapping } from './directNv.mjs';
 
 const json = value => JSON.stringify(value);
 
@@ -14,11 +14,34 @@ async function activeConfig(db) {
   return result.rows[0];
 }
 
-async function checkpoint(db, runId, { source,nextRow,rowsRead,status,error=null }) {
+async function checkpoint(db, runId, { source,pageStart,pageEnd,page,nextRow,rowsRead,status,error=null }) {
+  if(pageStart && pageEnd && page) await db.query(`insert into nv_ingestion_page_cache(run_id,nv_id,google_file_id,sheet_name,page_start,page_end,page_data)
+    values($1,$2,$3,$4,$5,$6,$7) on conflict(run_id,google_file_id,sheet_name,page_start) do update set
+    page_end=excluded.page_end,page_data=excluded.page_data,updated_at=now()`,
+  [runId,source.nv_id,source.google_file_id,source.sheet_name,pageStart,pageEnd,json(page)]);
   await db.query(`insert into nv_ingestion_checkpoints(run_id,nv_id,google_file_id,sheet_name,next_row,rows_read,status,error)
     values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(run_id,google_file_id,sheet_name) do update set
     next_row=excluded.next_row,rows_read=excluded.rows_read,status=excluded.status,error=excluded.error,updated_at=now()`,
   [runId,source.nv_id,source.google_file_id,source.sheet_name,nextRow,rowsRead,status,error]);
+}
+
+const positiveInt=(value,fallback)=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):fallback;
+const defaultLog=event=>console.log(json({timestamp:new Date().toISOString(),...event}));
+
+async function resumablePages(db, configVersion) {
+  const result=await db.query(`select p.google_file_id,p.sheet_name,p.page_start,p.page_end,p.page_data
+    from nv_ingestion_page_cache p join sync_runs r on r.id=p.run_id
+    where r.run_type='direct_nv_ingestion' and r.status='fail' and r.meta->>'config_version'=$1
+      and p.run_id=(select r2.id from sync_runs r2 where r2.run_type='direct_nv_ingestion' and r2.status='fail'
+        and r2.meta->>'config_version'=$1 order by r2.started_at desc limit 1)
+    order by p.google_file_id,p.page_start`,[configVersion]);
+  const bySource=new Map();
+  for(const row of result.rows||[]) {
+    const key=`${row.google_file_id}:${row.sheet_name}`;
+    if(!bySource.has(key))bySource.set(key,new Map());
+    bySource.get(key).set(`${row.page_start}:${row.page_end}`,typeof row.page_data==='string'?JSON.parse(row.page_data):row.page_data);
+  }
+  return bySource;
 }
 
 function mirrorRows(rows, runId) {
@@ -33,11 +56,12 @@ function brandRows(rows, runId) {
     realtime_share:mapped_row.realtime_share, viral_label:mapped_row.viral_label, bonus_amount:mapped_row.bonus_amount, published_run_id:runId })));
 }
 
-export async function publishNvRows(db, runId, configVersion, rows, sourceCount) {
+export async function publishNvRows(db, runId, configVersion, rows, sourceCount, {statementTimeoutMs=120000}={}) {
   const raw=mirrorRows(rows,runId), brands=brandRows(rows,runId);
   const fingerprint=crypto.createHash('sha256').update(rows.map(r=>`${r.row_key}:${r.source_hash}`).sort().join('\n')).digest('hex');
   await db.query('begin');
   try {
+    await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.max(1,Math.floor(statementTimeoutMs)))]);
     await db.query(`select pg_advisory_xact_lock(hashtext('onicorn:direct-nv-publish'))`);
     const gate=(await db.query(`select count(*)::int total,count(*) filter(where status in ('ok','empty'))::int ok from nv_ingestion_checkpoints where run_id=$1`,[runId])).rows[0];
     if (Number(gate.total)!==sourceCount || Number(gate.ok)!==sourceCount) throw new Error('source checkpoint gate failed');
@@ -57,9 +81,23 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount)
   } catch (error) { await db.query('rollback'); throw error; }
 }
 
-export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Number(process.env.NV_CONCURRENCY||2),pageRows=Number(process.env.NV_PAGE_ROWS||500),publisher=publishNvRows }={}) {
+export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Number(process.env.NV_CONCURRENCY||2),pageRows=Number(process.env.NV_PAGE_ROWS||500),
+  pageTimeoutMs=positiveInt(process.env.NV_PAGE_TIMEOUT_MS,120000),sourceTimeoutMs=positiveInt(process.env.NV_SOURCE_TIMEOUT_MS,120000),
+  totalTimeoutMs=positiveInt(process.env.NV_TOTAL_TIMEOUT_MS,1500000),heartbeatMs=positiveInt(process.env.NV_HEARTBEAT_MS,30000),
+  sourceRetries=positiveInt(process.env.NV_SOURCE_RETRIES,1),publisher=publishNvRows,log=defaultLog }={}) {
   db ||= await connectDb(); let runId; let ownDb=!arguments[0]?.db;
+  let dbQueue=Promise.resolve(); let heartbeat; const startedAt=Date.now(); let terminal=false; let locked=false;
+  const deadlineAt=startedAt+totalTimeoutMs;
+  const queued=fn=>{const next=dbQueue.then(fn);dbQueue=next.catch(()=>{});return next;};
+  const progress=event=>log({job:'direct_nv_ingestion',runId,...event,elapsedMs:Date.now()-startedAt});
+  const assertActive=()=>{if(Date.now()-startedAt>=totalTimeoutMs)throw new NvTimeoutError('direct NV total runtime',totalTimeoutMs);};
   try {
+    const lockResult=await queued(()=>db.query(`select pg_try_advisory_lock(hashtext('onicorn:direct-nv-run')) locked`));
+    if(lockResult.rows?.[0]?.locked===false)throw new Error('another direct NV run holds the scheduler lock');
+    locked=true;
+    await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,
+      error=coalesce(error,'abandoned after total runtime deadline') where run_type='direct_nv_ingestion' and status='running'
+      and started_at < now()-($1::int * interval '1 millisecond')`,[totalTimeoutMs]));
     const config=await activeConfig(db); const sources=await discoverSources(db,registryFile);
     if (!sources.length) throw new Error('active NV source registry contains zero sources');
     const expectedRaw=process.env.NV_EXPECTED_ACTIVE_COUNT;
@@ -67,28 +105,40 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       throw new Error(`active NV source count does not match NV_EXPECTED_ACTIVE_COUNT; expected ${expectedRaw}, got ${sources.length}`);
     }
     runId=(await db.query(`insert into sync_runs(run_type,status,files_total,meta) values('direct_nv_ingestion','running',$1,$2) returning id`,
-      [sources.length,json({read_only_google:true,config_version:config.version,source:'employee-sheets',master_as_data:false})])).rows[0].id;
+      [sources.length,json({read_only_google:true,config_version:config.version,source:'employee-sheets',master_as_data:false,timeouts:{page_ms:pageTimeoutMs,source_ms:sourceTimeoutMs,total_ms:totalTimeoutMs}})])).rows[0].id;
+    progress({event:'start',status:'running',sources:sources.length});
+    heartbeat=setInterval(()=>progress({event:'heartbeat',status:'running'}),heartbeatMs); heartbeat.unref?.();
     api ||= await createReadonlyApi();
     // pg Client permits only one query at a time. Serialize checkpoint writes while sheet reads remain concurrent.
     let checkpointQueue = Promise.resolve();
     const safeCheckpoint = event => {
-      const next = checkpointQueue.then(() => checkpoint(db,runId,event));
+      const next = checkpointQueue.then(() => queued(()=>checkpoint(db,runId,event)));
       checkpointQueue = next.catch(() => {});
       return next;
     };
-    const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,checkpoint:safeCheckpoint});
+    const cached=await queued(()=>resumablePages(db,config.version));
+    const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,pageTimeoutMs,sourceTimeoutMs,
+      sourceRetries,checkpoint:safeCheckpoint,progress,resumePages:source=>cached.get(`${source.google_file_id}:${source.sheet_name}`)||new Map(),assertActive,deadlineAt});
     await checkpointQueue;
+    assertActive();
     if (!rows.length) throw new Error('validation failed: active NV sources produced zero rows');
     const diagnostics = rows.diagnostics || {active:sources.length,empty:0,failed:0,total:sources.length};
     await db.query(`update sync_runs set meta=meta || $2 where id=$1`, [runId, json({source_counts:diagnostics})]);
     await db.query('begin');
     try {
+      await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.max(1,Math.floor(deadlineAt-Date.now())))]);
       await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,maxParams:30000});
       await db.query('commit');
     } catch(error) { await db.query('rollback'); throw error; }
-    return await publisher(db,runId,config.version,rows,sources.length);
+    assertActive();
+    const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now())});
+    assertActive();
+    terminal=true; progress({event:'final',status:'published',lastKnownGoodPreserved:true,...result});
+    return result;
   } catch(error) {
-    if(runId) await db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,error=$2 where id=$1`,[runId,String(error.message).slice(0,2000)]).catch(()=>{});
+    if(runId) await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,error=$2 where id=$1`,[runId,String(error.message).slice(0,2000)])).catch(()=>{});
+    terminal=true; progress({event:'final',status:'blocked',error:String(error.message),lastKnownGoodPreserved:true});
+    error.nvFinalLogged=true;
     throw error;
-  } finally { if(ownDb) await db.end(); }
+  } finally { clearInterval(heartbeat); await dbQueue; if(!terminal) progress({event:'final',status:'blocked',error:'terminated without final status',lastKnownGoodPreserved:true}); if(locked)await db.query(`select pg_advisory_unlock(hashtext('onicorn:direct-nv-run'))`).catch(()=>{}); if(ownDb) await db.end(); }
 }

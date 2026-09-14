@@ -51,11 +51,30 @@ create table if not exists nv_ingestion_checkpoints (
   sheet_name text not null,
   next_row integer not null,
   rows_read integer not null default 0,
-  status text not null check (status in ('running','ok','fail','skipped')),
+  status text not null check (status in ('running','ok','empty','fail','skipped')),
   error text,
   updated_at timestamptz not null default now(),
   primary key (run_id, google_file_id, sheet_name)
 );
+
+-- Completed page payloads make retries and later failed-run resumes re-read only
+-- the page that failed. They are immutable run evidence, never published directly.
+create table if not exists nv_ingestion_page_cache (
+  run_id uuid not null references sync_runs(id) on delete cascade,
+  nv_id text not null,
+  google_file_id text not null,
+  sheet_name text not null,
+  page_start integer not null,
+  page_end integer not null,
+  page_data jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (run_id, google_file_id, sheet_name, page_start)
+);
+create index if not exists nv_ingestion_page_cache_resume_idx on nv_ingestion_page_cache(google_file_id,sheet_name,updated_at desc);
+
+-- Upgrade databases where the table was created by an earlier version.
+alter table nv_ingestion_checkpoints drop constraint if exists nv_ingestion_checkpoints_status_check;
+alter table nv_ingestion_checkpoints add constraint nv_ingestion_checkpoints_status_check check (status in ('running','ok','empty','fail','skipped'));
 
 create table if not exists nv_posts_staging (
   run_id uuid not null references sync_runs(id) on delete cascade,
