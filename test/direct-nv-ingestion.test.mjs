@@ -11,13 +11,11 @@ const header=COLUMN_MAPPING.map(x=>x[0]);
 const data=i=>['2026-09-01',`Brand ${i}`,`Channel ${i}`,`https://example.com/post/${i}`,`Employee ${i}`,'Không','',100+i,10,2,1,3,90,9,1,1,2,0.17,'Đã đăng',0,'Có','2026-09-02'];
 const sources=Array.from({length:24},(_,i)=>({nv_id:`NV${String(i+1).padStart(2,'0')}`,google_file_id:`file-${i+1}`,sheet_name:'BAO CAO HANG NGAY',active:true,expected_columns:22}));
 
-test('fixture registry has 20-30 entries and preserves/skips inactive NV15/NV16',async()=>{
+test('registry treats blank/missing status active and skips authoritative inactive status',async()=>{
   const fixture=JSON.parse(fs.readFileSync('config/nv-sources.example.json','utf8'));
   assert.equal(fixture.sources.length,24);
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-registry-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify(fixture));
-  const prior=process.env.INACTIVE_STAFF_IDS; process.env.INACTIVE_STAFF_IDS='NV15,NV16';
-  try { const active=await discoverSources({},file); assert.equal(active.length,22); assert.ok(active.every(x=>!['NV15','NV16'].includes(x.nv_id))); }
-  finally { if(prior===undefined) delete process.env.INACTIVE_STAFF_IDS; else process.env.INACTIVE_STAFF_IDS=prior; }
+  const active=await discoverSources({},file); assert.equal(active.length,22); assert.ok(active.every(x=>!['NV15','NV16'].includes(x.nv_id)));
 });
 
 test('finds real employee header at row 5 and preserves data source row numbers',async()=>{
@@ -27,6 +25,15 @@ test('finds real employee header at row 5 and preserves data source row numbers'
   const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:6}}}]}),values:async()=>({values:[title,instruction,[],['Tháng 09/2026'],header.map((h,i)=>i===0?' ngày đăng bài ':h),data(5)]})};
   const rows=await readSource(api,source);
   assert.equal(rows.length,1); assert.equal(rows[0].sourceRow,6); assert.deepEqual(rows[0].values,data(5));
+});
+
+test('auto-detects the ordered header at row 1 and a later arbitrary position',async()=>{
+  for (const prefix of [[],[['title'],[],['instructions'],['period'],[],['more']]]) {
+    const source={nv_id:'EMPLOYEE-X',google_file_id:'header-position',sheet_name:'BAO CAO HANG NGAY'};
+    const values=[...prefix,header,data(7)];
+    const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:values.length}}}]}),values:async()=>({values})};
+    const rows=await readSource(api,source); assert.equal(rows[0].sourceRow,prefix.length+2);
+  }
 });
 
 test('ignores preformatted blank/template rows when calculating malformed ratio',async()=>{
@@ -42,7 +49,7 @@ test('readable valid empty source is skipped with empty diagnostic',async()=>{
   const source={nv_id:'NV13',google_file_id:'empty-13',sheet_name:'BAO CAO HANG NGAY'};
   const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:source.sheet_name,gridProperties:{rowCount:3}}}]}),values:async()=>({values:[['Tiêu đề'],['Hướng dẫn'],header]})};
   const checkpoints=[]; const rows=await collectNvRows({api,sources:[source],configVersion:'master-v1',checkpoint:e=>checkpoints.push(e)});
-  assert.equal(rows.length,0); assert.deepEqual(rows.diagnostics,{active:0,empty:1,failed:0,total:1}); assert.equal(checkpoints.at(-1).status,'empty');
+  assert.equal(rows.length,0); assert.equal(rows.diagnostics.empty,1); assert.equal(rows.diagnostics.failed,0); assert.deepEqual(rows.diagnostics.fresh_source_ids,['empty-13']); assert.equal(checkpoints.at(-1).status,'empty');
 });
 
 test('empty sources do not hide zero-total fail-closed guard',async()=>{
@@ -119,15 +126,16 @@ test('34 active registry sources are accepted without a hard-coded upper bound',
   assert.equal(result.sourceCount,34); assert.equal(result.rows,34);
 });
 
-test('partial source failure never invokes publisher and preserves prior publication',async()=>{
-  let published={run_id:'last-good'}; let publisherCalls=0; const events=[];
+test('failed and successful sources publish partial data with failure metadata',async()=>{
+  let publisherCalls=0; let publisherOptions; const events=[];
   const registry={sources};const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-partial-'));const file=path.join(dir,'registry.json');fs.writeFileSync(file,JSON.stringify(registry));
   const db={end:async()=>{},query:async sql=>{
     if(sql.includes('select c.version'))return {rows:[{version:'master-v1',mapping:COLUMN_MAPPING}]};
     if(sql.includes('insert into sync_runs'))return {rows:[{id:'00000000-0000-0000-0000-000000000001'}]};
     return {rows:[]};}};
   const api={spreadsheetMeta:async id=>{if(id==='file-9')throw new Error('upstream partial failure');return {sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}},values:async id=>({values:[header,data(Number(id.split('-')[1]))]})};
-  await assert.rejects(runDirectNvIngestion({db,api,registryFile:file,log:event=>events.push(event),publisher:async()=>{publisherCalls++;published={run_id:'bad'};}}),/partial failure/);
-  assert.equal(publisherCalls,0);assert.deepEqual(published,{run_id:'last-good'});
-  assert.deepEqual(events.filter(event=>event.event==='final').map(event=>event.status),['blocked']);
+  const result=await runDirectNvIngestion({db,api,registryFile:file,log:event=>events.push(event),publisher:async(_db,_run,_version,rows,_count,options)=>{publisherCalls++;publisherOptions=options;return {rows:rows.length};}});
+  assert.equal(publisherCalls,1); assert.equal(result.rows,23); assert.equal(publisherOptions.diagnostics.failed,1);
+  assert.match(publisherOptions.diagnostics.errors[0].message,/partial failure/);
+  assert.deepEqual(events.filter(event=>event.event==='final').map(event=>event.status),['partial']);
 });

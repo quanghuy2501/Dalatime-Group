@@ -52,7 +52,7 @@ def verify(blueprint: dict) -> None:
     if str(nv_ingestion.get("startCommand", "")) != "npm run migrate:nv && npm run seed:nv-sources && npm run sync:nv":
         raise ValueError("direct NV cron must run the transactional NV migration before sync:nv")
     nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
-    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID", "INACTIVE_STAFF_IDS"):
+    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID"):
         if key not in nv_env:
             raise ValueError(f"direct NV env is missing {key}")
     for key in ("NV_PAGE_TIMEOUT_MS", "NV_SOURCE_TIMEOUT_MS", "NV_TOTAL_TIMEOUT_MS", "NV_HEARTBEAT_MS", "NV_SOURCE_RETRIES", "GOOGLE_REQUESTS_PER_MINUTE"):

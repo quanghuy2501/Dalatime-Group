@@ -56,28 +56,34 @@ function brandRows(rows, runId) {
     realtime_share:mapped_row.realtime_share, viral_label:mapped_row.viral_label, bonus_amount:mapped_row.bonus_amount, published_run_id:runId })));
 }
 
-export async function publishNvRows(db, runId, configVersion, rows, sourceCount, {statementTimeoutMs=120000}={}) {
+export async function publishNvRows(db, runId, configVersion, rows, sourceCount, {statementTimeoutMs=120000,diagnostics={}}={}) {
   const raw=mirrorRows(rows,runId), brands=brandRows(rows,runId);
   const fingerprint=crypto.createHash('sha256').update(rows.map(r=>`${r.row_key}:${r.source_hash}`).sort().join('\n')).digest('hex');
   await db.query('begin');
   try {
     await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.max(1,Math.floor(statementTimeoutMs)))]);
     await db.query(`select pg_advisory_xact_lock(hashtext('onicorn:direct-nv-publish'))`);
-    const gate=(await db.query(`select count(*)::int total,count(*) filter(where status in ('ok','empty'))::int ok from nv_ingestion_checkpoints where run_id=$1`,[runId])).rows[0];
-    if (Number(gate.total)!==sourceCount || Number(gate.ok)!==sourceCount) throw new Error('source checkpoint gate failed');
-    await db.query('delete from post_brands_sheet'); await db.query('delete from posts_raw_sheet');
+    const gate=(await db.query(`select count(*)::int total,count(*) filter(where status in ('ok','empty','fail'))::int terminal from nv_ingestion_checkpoints where run_id=$1`,[runId])).rows[0];
+    if (Number(gate.total)!==sourceCount || Number(gate.terminal)!==sourceCount) throw new Error('source checkpoint gate failed');
+    const freshSourceIds=diagnostics.fresh_source_ids||[];
+    if (!freshSourceIds.length) throw new Error('no readable NV sources; last-known-good publication preserved');
+    await db.query(`delete from post_brands_sheet b using posts_raw_sheet p where b.raw_sheet_row_key=p.row_key and p.source_file_id=any($1::text[])`,[freshSourceIds]);
+    await db.query(`delete from posts_raw_sheet where source_file_id=any($1::text[])`,[freshSourceIds]);
     await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:30000});
     await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{maxParams:30000});
     const counts=(await db.query(`select (select count(*) from posts_raw_sheet where published_run_id=$1)::int raw,
-      (select count(*) from nv_posts_staging where run_id=$1)::int staged`,[runId])).rows[0];
+      (select count(*) from posts_raw_sheet)::int total,(select count(*) from nv_posts_staging where run_id=$1)::int staged`,[runId])).rows[0];
     if (Number(counts.raw)!==rows.length || Number(counts.staged)!==rows.length) throw new Error('in-transaction publication parity failed');
     await db.query(`insert into nv_published_snapshots(singleton,run_id,config_version,row_count,fingerprint) values(true,$1,$2,$3,$4)
       on conflict(singleton) do update set run_id=excluded.run_id,config_version=excluded.config_version,row_count=excluded.row_count,fingerprint=excluded.fingerprint,published_at=now()`,
-      [runId,configVersion,rows.length,fingerprint]);
-    await db.query(`update sync_runs set status='ok',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,
-      rows_read=$2,rows_written=$2,files_total=$3,files_ok=$3 where id=$1`,[runId,rows.length,sourceCount]);
+      [runId,configVersion,Number(counts.total),fingerprint]);
+    const runStatus=diagnostics.failed?'partial':'ok';
+    await db.query(`update sync_runs set status=$4,finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,
+      rows_read=$2,rows_written=$2,files_total=$3,files_ok=$5,files_fail=$8,error=$6,meta=meta||$7::jsonb where id=$1`,
+      [runId,rows.length,sourceCount,runStatus,sourceCount-(diagnostics.failed||0),diagnostics.failed?json(diagnostics.errors):null,
+        json({partial:Boolean(diagnostics.failed),errors:diagnostics.errors||[],freshness:{fresh_source_ids:freshSourceIds,last_known_good_source_ids:(diagnostics.failed_sources||[]).map(x=>x.google_file_id)}}),diagnostics.failed||0]);
     await db.query('commit');
-    return {runId,rows:rows.length,brands:brands.length,fingerprint,configVersion};
+    return {runId,status:runStatus,rows:rows.length,totalRows:Number(counts.total),brands:brands.length,fingerprint,configVersion,diagnostics};
   } catch (error) { await db.query('rollback'); throw error; }
 }
 
@@ -121,9 +127,8 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       sourceRetries,checkpoint:safeCheckpoint,progress,resumePages:source=>cached.get(`${source.google_file_id}:${source.sheet_name}`)||new Map(),assertActive,deadlineAt});
     await checkpointQueue;
     assertActive();
-    if (!rows.length) throw new Error('validation failed: active NV sources produced zero rows');
-    const diagnostics = rows.diagnostics || {active:sources.length,empty:0,failed:0,total:sources.length};
-    await db.query(`update sync_runs set meta=meta || $2 where id=$1`, [runId, json({source_counts:diagnostics})]);
+    const diagnostics = rows.diagnostics || {successful:sources.length,empty:0,failed:0,total:sources.length,errors:[],failed_sources:[],fresh_source_ids:sources.map(x=>x.google_file_id)};
+    await db.query(`update sync_runs set meta=meta || $2::jsonb where id=$1`, [runId, json({source_counts:{successful:diagnostics.successful,empty:diagnostics.empty,failed:diagnostics.failed,total:diagnostics.total},errors:diagnostics.errors})]);
     await db.query('begin');
     try {
       await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.max(1,Math.floor(deadlineAt-Date.now())))]);
@@ -131,9 +136,9 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       await db.query('commit');
     } catch(error) { await db.query('rollback'); throw error; }
     assertActive();
-    const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now())});
+    const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now()),diagnostics});
     assertActive();
-    terminal=true; progress({event:'final',status:'published',lastKnownGoodPreserved:true,...result});
+    terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result});
     return result;
   } catch(error) {
     if(runId) await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,error=$2 where id=$1`,[runId,String(error.message).slice(0,2000)])).catch(()=>{});

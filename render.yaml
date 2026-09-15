@@ -51,8 +51,6 @@ services:
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
-      - key: INACTIVE_STAFF_IDS
-        value: NV15,NV16
       - key: NV_CONCURRENCY
         value: "3"
       - key: NV_PAGE_ROWS

@@ -39,10 +39,15 @@ create table if not exists nv_ingestion_sources (
   google_file_id text not null unique,
   sheet_name text not null default 'BAO CAO HANG NGAY',
   active boolean not null default true,
+  status text,
   expected_columns integer not null default 22 check (expected_columns = 22),
   updated_at timestamptz not null default now(),
   check (lower(google_file_id) <> lower(coalesce(current_setting('app.master_spreadsheet_id', true), '')))
 );
+
+-- Status is authoritative when present. Blank/missing status is active; the
+-- legacy active flag remains for backwards compatibility with older registries.
+alter table nv_ingestion_sources add column if not exists status text;
 
 create table if not exists nv_ingestion_checkpoints (
   run_id uuid not null references sync_runs(id) on delete cascade,

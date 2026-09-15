@@ -4,7 +4,6 @@ import { GoogleApi } from '../google/googleApi.mjs';
 import { parseBoolVN, parseDateAny, parseNumberVN, normalizeUrl, splitBrands, engagementRateFromMetrics } from '../utils/normalize.mjs';
 
 export const NV_SHEET = 'BAO CAO HANG NGAY';
-export const INACTIVE_NV = new Set(['NV15', 'NV16']);
 export const COLUMN_MAPPING = Object.freeze([
   ['NGÀY ĐĂNG BÀI','posted_date'], ['TÊN THƯƠNG HIỆU','brand_text_raw'], ['TÊN KÊNH','channel_name'],
   ['LINK BÀI ĐĂNG','post_url'], ['NGƯỜI PHỤ TRÁCH','owner_name'], ['ĐỘC QUYỀN','is_exclusive'], ['VIRAL','viral_label'],
@@ -34,7 +33,12 @@ export async function withTimeout(operation, timeoutMs, scope) {
     ]);
   } finally { clearTimeout(timer); }
 }
-const inactiveSet = () => new Set([...INACTIVE_NV, ...clean(process.env.INACTIVE_STAFF_IDS).split(',').map(x => x.trim().toUpperCase()).filter(Boolean)]);
+const INACTIVE_STATUSES = new Set(['inactive','disabled','retired','archived','offboarded']);
+export const isSourceActive = source => {
+  const status=clean(source?.status).toLocaleLowerCase('und');
+  if (status) return !INACTIVE_STATUSES.has(status);
+  return source?.active !== false;
+};
 
 export function validateMapping(mapping = COLUMN_MAPPING) {
   if (!Array.isArray(mapping) || mapping.length !== 22) throw new Error(`mapping mismatch: expected exactly 22 columns, got ${mapping?.length ?? 0}`);
@@ -85,9 +89,8 @@ export function loadRegistryFile(file) {
 }
 
 export async function discoverSources(db, registryFile = process.env.NV_SOURCE_REGISTRY) {
-  const sources = registryFile ? loadRegistryFile(registryFile) : (await db.query(`select nv_id,google_file_id,sheet_name,active,expected_columns from nv_ingestion_sources order by nv_id`)).rows;
+  const sources = registryFile ? loadRegistryFile(registryFile) : (await db.query(`select nv_id,google_file_id,sheet_name,status,active,expected_columns from nv_ingestion_sources order by nv_id`)).rows;
   const master = clean(process.env.MASTER_SPREADSHEET_ID || '1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0');
-  const inactive = inactiveSet();
   const seen = new Set();
   return sources.filter(source => {
     source.nv_id = clean(source.nv_id).toUpperCase(); source.google_file_id = clean(source.google_file_id); source.sheet_name = clean(source.sheet_name || NV_SHEET);
@@ -95,7 +98,7 @@ export async function discoverSources(db, registryFile = process.env.NV_SOURCE_R
     seen.add(source.google_file_id);
     if (master && source.google_file_id === master) throw new Error('Master spreadsheet cannot be an NV ingestion source');
     if (source.sheet_name !== NV_SHEET || Number(source.expected_columns ?? 22) !== 22) throw new Error(`invalid source mapping for ${source.nv_id}`);
-    return source.active !== false && !inactive.has(source.nv_id);
+    return isSourceActive(source);
   });
 }
 
@@ -196,14 +199,16 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       if(attempt<sourceRetries) continue;
     }
     await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(lastError.message).slice(0,2000)});
-    return {error:lastError};
+    return {error:lastError,source};
   });
   const failures=groups.filter(group=>group?.error);
-  if(failures.length) throw new Error(`${failures.length} NV source(s) failed: ${failures.map(x=>x.error.message).join('; ')}`);
   const empty=groups.filter(group=>group?.empty).length;
   const rows=groups.filter(Array.isArray).flat(); const keys=new Set();
   for (const row of rows) { if (keys.has(row.row_key)) throw new Error(`duplicate idempotency key: ${row.row_key}`); keys.add(row.row_key); }
-  Object.defineProperty(rows,'diagnostics',{value:{active:sources.length-empty,empty,failed:0,total:sources.length},enumerable:false});
+  Object.defineProperty(rows,'diagnostics',{value:{successful:sources.length-empty-failures.length,empty,failed:failures.length,total:sources.length,
+    errors:failures.map(group=>({nv_id:group.source?.nv_id,message:String(group.error?.message||group.error)})),
+    failed_sources:failures.map(group=>group.source),
+    fresh_source_ids:groups.flatMap((group,i)=>Array.isArray(group)||group?.empty?[sources[i].google_file_id]:[])},enumerable:false});
   return rows;
 }
 
