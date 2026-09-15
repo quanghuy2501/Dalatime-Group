@@ -4,8 +4,12 @@ import json, os, re, shutil, subprocess, time, urllib.request, uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from config import Settings
-from pipeline import atomic_json, digest, load, reconcile, sync, validate_snapshot
+try:
+    from .config import Settings
+    from .pipeline import atomic_json, digest, load, reconcile, sync, validate_snapshot
+except ImportError:
+    from config import Settings
+    from pipeline import atomic_json, digest, load, reconcile, sync, validate_snapshot
 
 STAGES = ("staging", "validation", "reconciliation", "published")
 SECRET_KEY = re.compile(r"(secret|token|password|credential|database_url|notify_url)", re.I)
