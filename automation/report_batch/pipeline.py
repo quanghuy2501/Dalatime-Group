@@ -72,7 +72,29 @@ def _norm_key(value: Any) -> str:
     return ' '.join(str(value or '').strip().lower().replace('\\n', ' ').split())
 
 
-def normalize_rows(rows: list[dict]) -> tuple[list[dict], dict]:
+def row_key(row: dict) -> tuple | None:
+    """Return the semantic identity used by direct NV ingestion."""
+    url = next((row[k] for k in row if _norm_key(k) in ('post_url', 'url', 'link')), '')
+    brand = next((row[k] for k in row if _norm_key(k) in ('brand', 'post_brand', 'brand_csv')), '')
+    staff = next((row[k] for k in row if _norm_key(k) in ('staff_id', 'employee_id', 'email')), '')
+    if url:
+        # A missing brand is still one post, rather than an unlimited set of
+        # unidentifiable copies of the same URL.
+        return ('post_brand', _norm_key(url), _norm_key(brand))
+    return ('staff', _norm_key(staff)) if staff else None
+
+
+def _source_row_number(row: dict, fallback: int) -> int:
+    for name, value in row.items():
+        if _norm_key(name) in ('source_row_number', 'row_number', '_row_number'):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                break
+    return fallback
+
+
+def normalize_rows(rows: list[dict], deduplicate: bool = True) -> tuple[list[dict], dict]:
     """Remove sheet scaffolding while preserving real rows and stable ordering.
 
     Header/instruction/blank rows are presentation artifacts, not records. Duplicate
@@ -90,15 +112,75 @@ def normalize_rows(rows: list[dict]) -> tuple[list[dict], dict]:
         if ('instruction' in joined or 'do not edit' in joined or
             ('post_url' in values and ('brand' in values or 'status' in values))):
             dropped['header_or_instruction'] += 1; continue
-        url = next((row[k] for k in row if _norm_key(k) in ('post_url','url','link')), '')
-        brand = next((row[k] for k in row if _norm_key(k) in ('brand','post_brand')), '')
-        staff = next((row[k] for k in row if _norm_key(k) in ('staff_id','employee_id','email')), '')
-        key = ('post_brand', _norm_key(url), _norm_key(brand)) if url and brand else ('staff', _norm_key(staff)) if staff else None
-        if key and key in seen:
+        key = row_key(row)
+        if deduplicate and key and key in seen:
             dropped['duplicate'] += 1; continue
         if key: seen.add(key)
         kept.append(row)
     return kept, dropped
+
+
+def ingestion_plan(files: list[dict]) -> dict:
+    """Build a deterministic, globally de-duplicated direct-ingestion plan."""
+    sources, candidates, diagnostics = [], [], []
+    for source_index, item in enumerate(files or []):
+        file_id = str(item.get('id') or item.get('file_id') or '') if isinstance(item, dict) else ''
+        entry = {'id': file_id, 'source_index': source_index, 'status': 'failed',
+                 'rows': 0, 'dropped': {'empty': 0, 'header_or_instruction': 0, 'duplicate': 0}}
+        if not isinstance(item, dict) or not file_id:
+            entry['reason'] = 'missing_source_id'; sources.append(entry); continue
+        if item.get('error') or _norm_key(item.get('status')) in ('failed', 'error'):
+            entry['reason'] = str(item.get('error') or 'source_reported_failure'); sources.append(entry); continue
+        raw_rows = item.get('rows')
+        if not isinstance(raw_rows, list):
+            entry['reason'] = 'rows_not_a_list'; sources.append(entry); continue
+        # Global winner selection below must see every duplicate, including two
+        # copies inside one NV sheet.
+        rows, dropped = normalize_rows(raw_rows, deduplicate=False)
+        entry['dropped'] = dropped
+        if not rows:
+            entry['status'] = 'empty'; entry['reason'] = 'no_valid_rows'; sources.append(entry); continue
+        entry['status'] = 'active'; entry['rows'] = len(rows); sources.append(entry)
+        try:
+            precedence = int(item.get('source_precedence', item.get('precedence', source_index)))
+        except (TypeError, ValueError):
+            precedence = source_index
+        for row_index, row in enumerate(rows, 1):
+            candidates.append({'source': entry, 'row': row, 'key': row_key(row),
+                               'row_number': _source_row_number(row, row_index),
+                               'precedence': precedence, 'source_index': source_index})
+
+    winners = {}
+    for candidate in candidates:
+        key = candidate['key']
+        if key is None:
+            continue
+        rank = (candidate['row_number'], candidate['precedence'], candidate['source_index'],
+                digest(candidate['row']))
+        current = winners.get(key)
+        if current is None or rank > current[0]:
+            winners[key] = (rank, candidate)
+
+    rows_by_source = {s['id']: [] for s in sources if s['id'] and s['status'] == 'active'}
+    for candidate in candidates:
+        winner = winners.get(candidate['key'], (None, candidate))[1]
+        if winner is not candidate:
+            candidate['source']['dropped']['duplicate'] += 1
+            diagnostics.append({'type': 'duplicate', 'key': list(candidate['key']),
+                                'skipped_source': candidate['source']['id'],
+                                'skipped_row': candidate['row_number'],
+                                'winner_source': winner['source']['id'],
+                                'winner_row': winner['row_number']})
+            continue
+        rows_by_source[candidate['source']['id']].append(candidate['row'])
+    counts = {'active': sum(s['status'] == 'active' for s in sources),
+              'empty': sum(s['status'] == 'empty' for s in sources),
+              'failed': sum(s['status'] == 'failed' for s in sources),
+              'duplicate': len(diagnostics)}
+    return {'sources': sources, 'rows_by_source': rows_by_source,
+            'rows': [row for s in sources if s.get('id') in rows_by_source
+                     for row in rows_by_source[s['id']]],
+            'diagnostics': diagnostics, 'counts': counts}
 
 def sync(source: Path, state_dir: Path, dry_run=True, retries=RETRIES,
          require_sealed=False) -> dict:
@@ -112,12 +194,18 @@ def sync(source: Path, state_dir: Path, dry_run=True, retries=RETRIES,
         return {'status':'blocked','reason':'master_not_valid_complete_and_sealed','files':[],
                 'snapshot_check': snapshot_check}
     files = master.get('files', [])
+    plan = ingestion_plan(files)
     state = load(state_dir/'checkpoint.json', {'files':{}})
-    result = {'status':'dry-run' if dry_run else 'ok', 'files':[], 'changed':0, 'failed':0}
-    for item in files:
-        file_id = str(item.get('id') or item.get('file_id') or '')
-        if not file_id: result['failed'] += 1; continue
-        rows, dropped = normalize_rows(item.get('rows', []))
+    result = {'status':'dry-run' if dry_run else ('ok' if plan['counts']['active'] else 'blocked'),
+              'reason': None if plan['counts']['active'] else 'zero_valid_sources',
+              'files':[], 'changed':0, 'db_failed':0, **plan['counts'],
+              'diagnostics': plan['diagnostics']}
+    for source_entry in plan['sources']:
+        file_id = source_entry['id']
+        if source_entry['status'] != 'active':
+            result['files'].append(source_entry); continue
+        rows = plan['rows_by_source'][file_id]
+        dropped = source_entry['dropped']
         fp = digest(rows)
         previous = state['files'].get(file_id, {})
         entry = {'id':file_id,'fingerprint':fp,'rows':len(rows),'dropped':dropped,'status':'unchanged' if previous.get('fingerprint') == fp else 'changed'}
@@ -130,29 +218,46 @@ def sync(source: Path, state_dir: Path, dry_run=True, retries=RETRIES,
                     atomic_json(target, {'file_id':file_id,'fingerprint':fp,'rows':rows})
                     state['files'][file_id] = entry; break
                 except OSError:
-                    if attempt == retries-1: entry['status']='failed'; result['failed'] += 1
+                    if attempt == retries-1: entry['status']='failed'; result['db_failed'] += 1
                     else: time.sleep(0.05 * (2**attempt))
         result['files'].append(entry)
-    if not dry_run: atomic_json(state_dir/'checkpoint.json', state)
+    if not dry_run:
+        active_ids = set(plan['rows_by_source'])
+        # The state directory may have been cloned from the last publication.
+        # Remove stale/failed/empty source snapshots from this isolated staging
+        # transaction so they cannot leak into the next publication.
+        for target in (state_dir/'db').glob('*.json'):
+            if target.stem not in active_ids:
+                target.unlink()
+        atomic_json(state_dir/'checkpoint.json', state)
+        atomic_json(state_dir/'diagnostics.json', {'counts': plan['counts'], 'sources': plan['sources'],
+                                                   'duplicates': plan['diagnostics']})
+        if result['db_failed']:
+            result['status'] = 'blocked'; result['reason'] = 'database_write_failure'
     return result
 
 def reconcile(master_path: Path, db_dir: Path, report_path: Path, out: Path,
               require_sealed: bool = False) -> dict:
     master = load(master_path, {}); expected = master.get('files', [])
     snapshot_check = validate_snapshot(master, require_sealed=require_sealed) if 'metadata' in master else {'valid': not require_sealed, 'legacy': True}
-    master_rows = [r for f in expected for r in f.get('rows', [])]
+    plan = ingestion_plan(expected); master_rows = plan['rows']
     db_rows = []
     for p in sorted(db_dir.glob('*.json')):
         d = load(p, {}); db_rows.extend(d.get('rows', []))
     report = load(report_path, {})
+    report_plan = ingestion_plan([{'id': 'report', 'rows': report.get('rows', [])}])
+    report_rows = report_plan['rows']
     checks = {'master_db': digest(master_rows) == digest(db_rows),
-              'db_report': digest(db_rows) == digest(report.get('rows', [])),
-              'master_complete': master.get('status') == 'complete'}
+              'db_report': digest(db_rows) == digest(report_rows),
+              'master_complete': master.get('status') == 'complete',
+              'has_valid_sources': plan['counts']['active'] > 0}
     checks['snapshot_metadata'] = snapshot_check['valid']
     result = {'status':'pass' if all(checks.values()) else 'blocked','publish_allowed':all(checks.values()),'checks':checks,
               'run_id': master.get('run_id') or snapshot_check.get('run_id'),
               'fingerprint': (master.get('metadata') or {}).get('fingerprint'),
-              'counts':{'master':len(master_rows),'db':len(db_rows),'report':len(report.get('rows',[]))}}
+              'counts':{'master':len(master_rows),'db':len(db_rows),'report':len(report_rows),
+                        **plan['counts'], 'report_duplicate': report_plan['counts']['duplicate']},
+              'diagnostics': {'sources': plan['sources'], 'duplicates': plan['diagnostics']}}
     atomic_json(out.with_suffix('.json'), result)
     out.with_suffix('.md').write_text('# Reconciliation\n\n- Status: **%s**\n- Publish allowed: **%s**\n\n%s\n' % (result['status'], result['publish_allowed'], '\n'.join(f'- {k}: {v}' for k,v in checks.items())), encoding='utf-8')
     return result

@@ -4,8 +4,8 @@ import json, os, re, shutil, subprocess, time, urllib.request, uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from .config import Settings
-from .pipeline import atomic_json, digest, load, reconcile, sync, validate_snapshot
+from config import Settings
+from pipeline import atomic_json, digest, load, reconcile, sync, validate_snapshot
 
 STAGES = ("staging", "validation", "reconciliation", "published")
 SECRET_KEY = re.compile(r"(secret|token|password|credential|database_url|notify_url)", re.I)
@@ -82,18 +82,29 @@ def production_run(master: Path, state: Path, report: Path, production: bool=Fal
                 if state.resolve() not in previous_state.parents: raise RuntimeError("invalid active state path")
                 if previous_state.exists(): shutil.copytree(previous_state,staged_state)
             sync_result=sync(master,staged_state,dry_run=False,require_sealed=True)
-            if sync_result.get("status") != "ok" or sync_result.get("failed"): raise RuntimeError(f"staging sync blocked: {sync_result.get('reason','file failure')}")
+            if sync_result.get("status") != "ok": raise RuntimeError(f"staging sync blocked: {sync_result.get('reason','file failure')}")
             _stage_manifest(state,run_id,"validation","pass",checkpoint=digest(sync_result))
             checks=go_live_checks(master,state,report,settings,db_select,staged_state/"db"); reconciliation=checks["reconciliation"]
             _stage_manifest(state,run_id,"reconciliation","pass",reconciliation_fingerprint=digest(reconciliation))
-            published={"schema":"onicorn.published-manifest.v1","run_id":run_id,"stage":"published","status":"published","published_at":time.time(),"active_state_dir":str(staged_state.relative_to(state)),"snapshot_run_id":reconciliation.get("run_id"),"snapshot_fingerprint":reconciliation.get("fingerprint"),"reconciliation_fingerprint":digest(reconciliation),"counts":reconciliation.get("counts")}
+            run_status="partial" if sync_result.get("failed") or sync_result.get("empty") or sync_result.get("duplicate") else "published"
+            previous_manifest=load(state/"published.json",{})
+            published={"schema":"onicorn.published-manifest.v1","run_id":run_id,"stage":"published","status":run_status,"published_at":time.time(),"active_state_dir":str(staged_state.relative_to(state)),"snapshot_run_id":reconciliation.get("run_id"),"snapshot_fingerprint":reconciliation.get("fingerprint"),"reconciliation_fingerprint":digest(reconciliation),"counts":reconciliation.get("counts"),"diagnostics":reconciliation.get("diagnostics"),"last_known_good_run_id":previous_manifest.get("run_id")}
             current=state/"published.json"; lkg=state/"last-known-good.json"
             if current.exists(): shutil.copyfile(current,state/"staging"/"previous-published.json")
-            atomic_json(current,published); atomic_json(lkg,published)
+            # Everything referenced by the manifest is durable before the atomic
+            # published.json pointer changes (our transaction commit point).
+            published_rows=[r for p in sorted((staged_state/"db").glob("*.json"))
+                            for r in load(p,{}).get("rows",[])]
+            atomic_json(staged_state/"published-report.json",{"rows":published_rows})
+            # A partial run is useful and visible, but must never replace the
+            # last-known-good pointer. Only a fully healthy publication advances LKG.
+            if run_status == "published":
+                atomic_json(lkg,published)
+                atomic_json(state/"last-known-good-snapshot.json",load(master))
             atomic_json(state/"published-snapshot.json",load(master))
-            atomic_json(state/"last-known-good-snapshot.json",load(master))
+            atomic_json(current,published)
             _stage_manifest(state,run_id,"published","pass",manifest_fingerprint=digest(published)); logger.emit("run_published",counts=published["counts"])
-            return {"status":"published","run_id":run_id,"manifest":published}
+            return {"status":run_status,"run_id":run_id,"manifest":published}
         except Exception as exc:
             logger.emit("run_blocked",level="error",error_type=type(exc).__name__,error=str(exc))
             try: send_alert(settings.notify_url,{"service":"onicorn-report-worker","run_id":run_id,"status":"blocked","error_type":type(exc).__name__})
