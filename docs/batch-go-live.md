@@ -34,8 +34,8 @@ credentials, and `.env` files stay outside Git.
 
 `render.yaml` declares the existing Node web service and a daily Python cron. It
 runs `scheduled-run --production`; no `MASTER_SNAPSHOT_PATH` or
-`REPORT_SNAPSHOT_PATH` is required. Configure `GOOGLE_APPLICATION_CREDENTIALS`
-as the path to a Render secret file containing the service-account JSON, and set
+`REPORT_SNAPSHOT_PATH` is required. Configure `GOOGLE_APPLICATION_CREDENTIALS_JSON`
+as a Render secret env containing the complete service-account JSON, and set
 `DATABASE_URL`. Supabase upload is disabled when both its URL and service-role key
 are absent; if either is set, both and `SNAPSHOT_BUCKET` are required. The immutable
 Master object is uploaded only after snapshot/report validation and before local

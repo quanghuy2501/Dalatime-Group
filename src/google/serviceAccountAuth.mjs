@@ -1,8 +1,39 @@
 import fs from 'fs';
 import crypto from 'crypto';
 
-export function loadServiceAccount(path = process.env.GOOGLE_APPLICATION_CREDENTIALS || '/Users/quanghuy/.openclaw/secrets/onicorn-dashboard-service-account.json') {
-  return JSON.parse(fs.readFileSync(path, 'utf8'));
+const READONLY_SCOPES = [
+  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly'
+];
+
+function parseServiceAccountJson(value, source) {
+  let key;
+  try {
+    key = JSON.parse(value);
+  } catch {
+    throw new Error(`${source} must contain valid service-account JSON`);
+  }
+  if (!key || typeof key !== 'object' || !key.client_email || !key.private_key) {
+    throw new Error(`${source} must contain a service account client_email and private_key`);
+  }
+  return key;
+}
+
+export function loadServiceAccount(path = process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  if (path) {
+    try {
+      return parseServiceAccountJson(fs.readFileSync(path, 'utf8'), 'GOOGLE_APPLICATION_CREDENTIALS file');
+    } catch (error) {
+      if (!error?.code) throw error;
+    }
+  }
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    return parseServiceAccountJson(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON, 'GOOGLE_APPLICATION_CREDENTIALS_JSON');
+  }
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return parseServiceAccountJson(process.env.GOOGLE_SERVICE_ACCOUNT_JSON, 'GOOGLE_SERVICE_ACCOUNT_JSON');
+  }
+  throw new Error('Google service account credentials unavailable: set GOOGLE_APPLICATION_CREDENTIALS to a readable file or set GOOGLE_APPLICATION_CREDENTIALS_JSON');
 }
 
 function b64url(input) {
@@ -15,7 +46,7 @@ export async function getServiceAccountAccessToken({ scopes, keyPath } = {}) {
   const header = { alg: 'RS256', typ: 'JWT' };
   const claim = {
     iss: key.client_email,
-    scope: (scopes || ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']).join(' '),
+    scope: (scopes || READONLY_SCOPES).join(' '),
     aud: 'https://oauth2.googleapis.com/token',
     iat: now,
     exp: now + 3600

@@ -83,12 +83,16 @@ def _scheduled_master(temp):
         if not original.is_file(): raise ScheduledRunBlocked(f'MASTER_SNAPSHOT_PATH is not a readable file: {original}')
     else:
         credentials=os.getenv('GOOGLE_APPLICATION_CREDENTIALS','').strip()
+        credentials_json=bool(os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON','').strip() or os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON','').strip())
         spreadsheet_id=os.getenv('MASTER_SPREADSHEET_ID','').strip()
-        if not credentials: raise ScheduledRunBlocked('live Master snapshot export unavailable: GOOGLE_APPLICATION_CREDENTIALS is missing')
-        if not Path(credentials).is_file(): raise ScheduledRunBlocked('live Master snapshot export unavailable: GOOGLE_APPLICATION_CREDENTIALS does not name a readable file')
+        readable_file=bool(credentials and Path(credentials).is_file())
+        if not readable_file and not credentials_json: raise ScheduledRunBlocked('live Master snapshot export unavailable: no readable GOOGLE_APPLICATION_CREDENTIALS file or JSON credential env is set')
         if not spreadsheet_id: raise ScheduledRunBlocked('live Master snapshot export unavailable: MASTER_SPREADSHEET_ID is missing')
         original=temp/'master-snapshot.json'; exporter=Path(__file__).resolve().parents[2]/'scripts'/'master_snapshot.py'
-        done=subprocess.run(['python3',str(exporter),'snapshot','--live','--credentials',credentials,'--master-id',spreadsheet_id,'--output',str(original)],capture_output=True,text=True,check=False)
+        command=['python3',str(exporter),'snapshot','--live']
+        if readable_file: command.extend(['--credentials',credentials])
+        command.extend(['--master-id',spreadsheet_id,'--output',str(original)])
+        done=subprocess.run(command,capture_output=True,text=True,check=False)
         if done.returncode:
             lines=(done.stderr or done.stdout).strip().splitlines(); detail=f': {lines[-1]}' if lines else ''
             raise ScheduledRunBlocked(f'live Master snapshot export failed with exit {done.returncode}{detail}')

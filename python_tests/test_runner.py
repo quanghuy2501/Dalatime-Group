@@ -56,17 +56,17 @@ class RunnerTests(unittest.TestCase):
 
     def test_missing_paths_scheduled_dry_run_auto_exports_without_publish_or_db(self):
         with TemporaryDirectory() as d:
-            root=Path(d); credentials=root/'credentials.json'; credentials.write_text('{}')
+            root=Path(d)
             sources={key:{'sheet':title,'origin':f'google:test:{title}','row_count':1,'column_count':1,'values':[[key]]} for key,title in SHEETS.items()}
             exported={'schema_version':1,'kind':'onicorn-master-snapshot','run_id':'google-run','status':'complete','locked':True,'read_only':True,'source_errors':[],'sources':sources,'sha256':fingerprint(sources)}
             def fake_export(command,**kwargs):
-                self.assertIn('--live',command); self.assertIn('--credentials',command); self.assertNotIn('update',command)
+                self.assertIn('--live',command); self.assertNotIn('--credentials',command); self.assertNotIn('update',command)
                 Path(command[command.index('--output')+1]).write_text(json.dumps(exported))
                 return subprocess.CompletedProcess(command,0,'{}','')
             before=dict(os.environ)
             try:
                 os.environ.pop('MASTER_SNAPSHOT_PATH',None); os.environ.pop('REPORT_SNAPSHOT_PATH',None)
-                os.environ.update({'GOOGLE_APPLICATION_CREDENTIALS':str(credentials),'MASTER_SPREADSHEET_ID':'test'})
+                os.environ.update({'GOOGLE_APPLICATION_CREDENTIALS':'/etc/secrets/unavailable.json','GOOGLE_APPLICATION_CREDENTIALS_JSON':'{"client_email":"exporter@example.test","private_key":"test-private-key"}','MASTER_SPREADSHEET_ID':'test'})
                 with patch('automation.report_batch.runner_cli.subprocess.run',side_effect=fake_export) as google, \
                      patch('automation.report_batch.runner_cli.production_run') as publish, \
                      patch('automation.report_batch.runner.verify_select') as database:
@@ -78,9 +78,9 @@ class RunnerTests(unittest.TestCase):
     def test_scheduled_blocked_reason_has_exit_two(self):
         before=dict(os.environ); argv=sys.argv
         try:
-            for key in ('MASTER_SNAPSHOT_PATH','GOOGLE_APPLICATION_CREDENTIALS'): os.environ.pop(key,None)
+            for key in ('MASTER_SNAPSHOT_PATH','GOOGLE_APPLICATION_CREDENTIALS','GOOGLE_APPLICATION_CREDENTIALS_JSON','GOOGLE_SERVICE_ACCOUNT_JSON'): os.environ.pop(key,None)
             sys.argv=['runner_cli','scheduled-run']
             with patch('builtins.print') as output: code=main()
-            self.assertEqual(code,2); self.assertIn('GOOGLE_APPLICATION_CREDENTIALS is missing',output.call_args.args[0])
+            self.assertEqual(code,2); self.assertIn('no readable GOOGLE_APPLICATION_CREDENTIALS file or JSON credential env is set',output.call_args.args[0])
         finally: sys.argv=argv; os.environ.clear(); os.environ.update(before)
 if __name__=='__main__': unittest.main()

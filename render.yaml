@@ -15,7 +15,7 @@ services:
         value: "10000"
       - key: DATABASE_URL
         sync: false
-      - key: GOOGLE_APPLICATION_CREDENTIALS
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
@@ -45,7 +45,7 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
-      - key: GOOGLE_APPLICATION_CREDENTIALS
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
@@ -78,7 +78,7 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
-      - key: GOOGLE_APPLICATION_CREDENTIALS
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
@@ -107,7 +107,7 @@ services:
         sync: false
       - key: DB_VERIFY_SELECT
         value: SELECT 1
-      - key: GOOGLE_APPLICATION_CREDENTIALS
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0

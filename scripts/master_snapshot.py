@@ -70,10 +70,36 @@ def b64url(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
+def load_service_account(key_file=None, environ=None):
+    """Load a key file when readable, otherwise use an env JSON secret."""
+    env = os.environ if environ is None else environ
+    raw = source = None
+    if key_file:
+        try:
+            raw = Path(key_file).read_text(encoding="utf-8")
+            source = "GOOGLE_APPLICATION_CREDENTIALS file"
+        except OSError:
+            pass
+    if raw is None:
+        for name in ("GOOGLE_APPLICATION_CREDENTIALS_JSON", "GOOGLE_SERVICE_ACCOUNT_JSON"):
+            if env.get(name):
+                raw, source = env[name], name
+                break
+    if raw is None:
+        raise ValueError("Google service account credentials unavailable: set GOOGLE_APPLICATION_CREDENTIALS to a readable file or set GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    try:
+        key = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"{source} must contain valid service-account JSON") from exc
+    if not isinstance(key, dict) or not key.get("client_email") or not key.get("private_key"):
+        raise ValueError(f"{source} must contain a service account client_email and private_key")
+    return key
+
+
 class ReadonlyGoogle:
     """Minimal GET-only Google client. There is deliberately no generic request/write method."""
     def __init__(self, key_file, retries=6, base_delay=1.0):
-        self.key = json.loads(Path(key_file).read_text(encoding="utf-8"))
+        self.key = load_service_account(key_file)
         self.retries = retries
         self.base_delay = base_delay
         self.token = self._token()
@@ -248,9 +274,10 @@ def export_snapshot(args):
     output_parent = Path(args.output).resolve().parent; output_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".master-snapshot-sheets-", dir=output_parent) as temp_dir:
         if args.live:
-            if not args.credentials:
-                raise SystemExit("--live requires --credentials or GOOGLE_APPLICATION_CREDENTIALS")
-            api = ReadonlyGoogle(args.credentials, args.retries, args.base_delay)
+            try:
+                api = ReadonlyGoogle(args.credentials, args.retries, args.base_delay)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
             try:
                 meta = api.modified_time(args.master_id); dimensions = api.sheet_dimensions(args.master_id)
                 watermark = {"drive_modified_time": meta.get("modifiedTime"), "captured_at": started, "run_id": run_id}

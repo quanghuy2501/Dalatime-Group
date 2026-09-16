@@ -29,6 +29,8 @@ Dry-run is the default and has readonly Google scopes:
 npm run config-push:dry-run
 ```
 
+Authentication first uses a readable file named by `GOOGLE_APPLICATION_CREDENTIALS`. If that path is absent or unreadable, it securely parses the full service-account object from `GOOGLE_APPLICATION_CREDENTIALS_JSON` (preferred) or `GOOGLE_SERVICE_ACCOUNT_JSON`. Render Cron should use the JSON secret env because `/etc/secrets` is not mounted. Credential contents are never logged. The fallback does not change scopes: dry-run/export remain Sheets read-only plus Drive metadata read-only, while only the production-gated config pilot requests Sheets write access.
+
 Production requires the CLI production flag (provided by the npm script), `NODE_ENV=production`, `CONFIG_PUSH_PRODUCTION=1`, and an explicit pilot of exactly two or three active registry IDs:
 
 ```sh

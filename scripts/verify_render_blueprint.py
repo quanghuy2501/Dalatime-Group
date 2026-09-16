@@ -32,6 +32,7 @@ def verify(blueprint: dict) -> None:
     automations = [service for service in services if service.get("type") in {"worker", "cron"}]
     automation = next((service for service in automations if "report-batch" in str(service.get("name", ""))), None)
     nv_ingestion = next((service for service in automations if "direct-nv-ingestion" in str(service.get("name", ""))), None)
+    config_push = next((service for service in automations if "config-push" in str(service.get("name", ""))), None)
     if not web or web.get("healthCheckPath") != "/healthz":
         raise ValueError("web service must preserve /healthz")
     if not automation:
@@ -42,7 +43,7 @@ def verify(blueprint: dict) -> None:
     if automation.get("type") == "cron" and "scheduled-run --production" not in command:
         raise ValueError("cron automation must explicitly run the gated production schedule")
     env = {item.get("key"): item for item in automation.get("envVars", [])}
-    for key in ("SNAPSHOT_DIR", "ONICORN_LOCK_FILE", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID"):
+    for key in ("SNAPSHOT_DIR", "ONICORN_LOCK_FILE", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "MASTER_SPREADSHEET_ID"):
         if key not in env:
             raise ValueError(f"automation env is missing {key}")
     if automation.get("type") == "worker" and not automation.get("disk"):
@@ -52,7 +53,7 @@ def verify(blueprint: dict) -> None:
     if str(nv_ingestion.get("startCommand", "")) != "npm run migrate:nv && npm run seed:nv-sources && npm run sync:nv":
         raise ValueError("direct NV cron must run the transactional NV migration before sync:nv")
     nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
-    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "MASTER_SPREADSHEET_ID"):
+    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "MASTER_SPREADSHEET_ID"):
         if key not in nv_env:
             raise ValueError(f"direct NV env is missing {key}")
     for key in ("NV_PAGE_TIMEOUT_MS", "NV_SOURCE_TIMEOUT_MS", "NV_TOTAL_TIMEOUT_MS", "NV_HEARTBEAT_MS", "NV_SOURCE_RETRIES", "GOOGLE_REQUESTS_PER_MINUTE"):
@@ -64,6 +65,13 @@ def verify(blueprint: dict) -> None:
         raise ValueError("direct NV Google request rate exceeds per-user quota")
     if int(nv_env["NV_TOTAL_TIMEOUT_MS"].get("value", 0)) >= 30 * 60 * 1000:
         raise ValueError("direct NV total timeout must be shorter than its 30-minute schedule")
+    if not config_push or config_push.get("type") != "cron":
+        raise ValueError("config push cron is required")
+    push_env = {item.get("key"): item for item in config_push.get("envVars", [])}
+    if "GOOGLE_APPLICATION_CREDENTIALS_JSON" not in push_env:
+        raise ValueError("config push env is missing GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if str(push_env.get("CONFIG_PUSH_PRODUCTION", {}).get("value")) != "0":
+        raise ValueError("config push cron must remain dry-run by default")
 
 
 def main() -> int:

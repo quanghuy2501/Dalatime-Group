@@ -8,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.master_snapshot import FILE_NAMES, SHEETS, _google_rows, export_snapshot, fingerprint
+from scripts.master_snapshot import FILE_NAMES, SHEETS, _google_rows, export_snapshot, fingerprint, load_service_account
 
 
 class FakePagedGoogle:
@@ -33,6 +33,16 @@ class MasterSnapshotTests(unittest.TestCase):
         rows = list(_google_rows(api, "book", "Sheet", 8, 2))
         self.assertEqual(rows, [["head"], ["one"], [], [], ["five"]])
         self.assertEqual(api.calls, [(1, 2), (3, 4), (5, 6), (7, 8)])
+
+    def test_json_env_fallback_when_credential_path_is_unreadable(self):
+        key = {"client_email": "exporter@example.test", "private_key": "test-private-key"}
+        loaded = load_service_account("/does/not/exist.json", {"GOOGLE_APPLICATION_CREDENTIALS_JSON": json.dumps(key)})
+        self.assertEqual(loaded, key)
+
+    def test_missing_credential_fails_without_exposing_secret_material(self):
+        with self.assertRaisesRegex(ValueError, "credentials unavailable") as raised:
+            load_service_account("/does/not/exist.json", {})
+        self.assertNotIn("private_key", str(raised.exception))
 
     def test_large_fixture_export_has_bounded_python_allocation(self):
         with TemporaryDirectory() as directory:
