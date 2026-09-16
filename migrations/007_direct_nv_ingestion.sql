@@ -99,6 +99,9 @@ create index if not exists nv_posts_staging_run_idx on nv_posts_staging(run_id);
 alter table posts_raw_sheet add column if not exists published_run_id uuid references sync_runs(id);
 alter table posts_raw_sheet add column if not exists config_version text;
 alter table post_brands_sheet add column if not exists published_run_id uuid references sync_runs(id);
+-- Older production databases were created before the brand mirror tracked writes.
+-- Keep the upsert contract compatible without dropping or rewriting existing data.
+alter table post_brands_sheet add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists nv_published_snapshots (
   singleton boolean primary key default true check (singleton),

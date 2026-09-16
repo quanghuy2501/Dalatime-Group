@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import { mapPostRaw } from '../src/importers/liveMaster.mjs';
 import { getOverview, getPosts } from '../src/db/queries.mjs';
 
+const directNvMigration = fs.readFileSync(new URL('../migrations/007_direct_nv_ingestion.sql', import.meta.url), 'utf8');
+const mirrorMigration = fs.readFileSync(new URL('../migrations/004_exact_sheet_mirror.sql', import.meta.url), 'utf8');
+
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/posts-mapping.json', import.meta.url)));
 
 test('Apps Script RAW_DATA fields map to the complete Posts API contract', () => {
@@ -26,6 +29,11 @@ test('Posts query exposes canonical brands, every engagement metric, flags, URL,
   assert.match(calls[0].sql, /p\.posted_date >=/);
   assert.match(calls[0].sql, /p\.posted_date <=/);
   assert.match(calls[0].sql, /post_brands_sheet/);
+});
+
+test('brand mirror schema supports the direct-NV upsert updated_at contract', () => {
+  assert.match(mirrorMigration, /create table if not exists post_brands_sheet[\s\S]*updated_at timestamptz not null default now\(\)/);
+  assert.match(directNvMigration, /alter table post_brands_sheet add column if not exists updated_at timestamptz not null default now\(\)/);
 });
 
 test('overview computes weighted aggregate ER and bounds rolling seven days at today', async () => {

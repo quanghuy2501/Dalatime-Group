@@ -49,6 +49,7 @@ create table if not exists post_brands_sheet (
   realtime_share integer default 0,
   viral_label text,
   bonus_amount numeric default 0,
+  updated_at timestamptz not null default now(),
   unique(raw_sheet_row_key, brand_name)
 );
 create index if not exists post_brands_sheet_brand_idx on post_brands_sheet(brand_name);
