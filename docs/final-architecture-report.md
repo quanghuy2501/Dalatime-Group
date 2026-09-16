@@ -15,7 +15,7 @@ Verification covers dynamic discovery, trailing-formula handling, shrink/expand 
 
 ## Readonly live audit — 2026-09-16
 
-`npm run config-push:dry-run` completed with zero Google writes and no failures: 40 registry sources, 21 active, 19 inactive, and 21 files evaluated. Snapshot `sha256:fb8d0d6841d796ea` discovered:
+`npm run config-push:dry-run` completed with zero Google writes and no failures: 40 registry sources, 21 active, 19 inactive, and 21 files evaluated. Final snapshot `sha256:452ddb5db2f9d005` discovered:
 
 | Section | Master last row | Records |
 |---|---:|---:|
