@@ -1,0 +1,64 @@
+{
+  "report_date": "2026-09-16",
+  "mode": "dry-run",
+  "google_writes": 0,
+  "database_writes": 0,
+  "master_snapshot": {
+    "range": "'CONFIG'!A1:H20",
+    "version": "sha256:d99c0e4dd04654ab",
+    "sha256": "d99c0e4dd04654ab59c1b2d134a99e7902e4590cbe7c347272629473781bfb59",
+    "modified_time": "2026-09-16T04:43:03.411Z",
+    "rows": 20,
+    "columns": 8
+  },
+  "registry_audit": {
+    "total": 40,
+    "active": 40,
+    "inactive": 0,
+    "blank_status": 40,
+    "employee_folder_files": 41,
+    "employee_folder_spreadsheets": 41,
+    "hardcoded_employee_ids": false
+  },
+  "permission_audit": {
+    "sample_size": 3,
+    "config_readable": 3,
+    "marker_columns_x_y_present": 3,
+    "service_account_can_edit": 3,
+    "public_reader_permission_seen": 3,
+    "emails_recorded": false
+  },
+  "dry_run": {
+    "targets": 40,
+    "completed": 40,
+    "config_matches": 0,
+    "would_update": 40,
+    "hash_skips": 0,
+    "failed": 0
+  },
+  "pilot": {
+    "status": "not_run",
+    "files": 0,
+    "reason": "No explicit production approval/evidence; production gate remained disabled."
+  },
+  "full_production": {
+    "status": "not_run",
+    "files": 0
+  },
+  "safety": {
+    "default_dry_run": true,
+    "production_requires": ["--production", "CONFIG_PUSH_PRODUCTION=1", "NODE_ENV=production", "2-3 CONFIG_PUSH_PILOT_NV_IDS or post-pilot CONFIG_PUSH_FULL_ROLLOUT=1"],
+    "max_concurrency": 2,
+    "max_requests_per_minute": 55,
+    "write_allowlist": ["'CONFIG'!A1:H20", "'CONFIG'!X1:Y2"],
+    "apps_script": false,
+    "drive_writes": false
+  },
+  "blockers": [
+    "Pilot/full production writes lack explicit approval and were not attempted.",
+    "The 40-row registry has blank status for every row, while legacy INACTIVE_STAFF_IDS names NV15 and NV16; registry status is authoritative and must be reconciled before production.",
+    "The employee folder contains 41 spreadsheets but the registry contains 40 rows; reconcile the unregistered sheet before production.",
+    "Migration 009 is implemented but intentionally not applied during this read-only audit.",
+    "Three sampled files expose anyone:reader permissions; ownership should review whether public-link access is intended."
+  ]
+}

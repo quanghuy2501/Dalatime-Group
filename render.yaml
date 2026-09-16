@@ -69,6 +69,29 @@ services:
         value: "55"
 
   - type: cron
+    name: Dalatime-Group-config-push-dry-run
+    runtime: node
+    region: singapore
+    schedule: "15 */6 * * *"
+    buildCommand: npm ci
+    startCommand: npm run config-push:dry-run
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: CONFIG_PUSH_PRODUCTION
+        value: "0"
+      - key: CONFIG_PUSH_CONCURRENCY
+        value: "2"
+      - key: CONFIG_PUSH_REQUESTS_PER_MINUTE
+        value: "55"
+
+  - type: cron
     name: Dalatime-Group-report-batch
     runtime: python
     region: singapore

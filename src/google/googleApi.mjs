@@ -35,11 +35,13 @@ export class GoogleApi {
   }
   async fetchJson(url, opts = {}) {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      if (opts.signal?.aborted) throw opts.signal.reason || new Error('Google API request aborted');
       await this.waitTurn();
       let res;
       try {
         res = await fetch(url, { ...opts, headers: { Authorization: `Bearer ${this.accessToken}`, 'content-type': 'application/json', ...(opts.headers || {}) } });
       } catch (e) {
+        if (opts.signal?.aborted || e?.name === 'AbortError') throw opts.signal?.reason || e;
         if (attempt < this.maxRetries) {
           const backoff = Math.min(60000, 2000 * Math.pow(2, attempt));
           await new Promise(r => setTimeout(r, backoff));
@@ -77,8 +79,8 @@ export class GoogleApi {
     const fields = encodeURIComponent('spreadsheetId,properties(title,locale,timeZone),sheets(properties(sheetId,title,index,gridProperties(rowCount,columnCount,frozenRowCount,columnCount)))');
     return this.fetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=${fields}`);
   }
-  async values(id, range) {
-    return this.fetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+  async values(id, range, opts = {}) {
+    return this.fetchJson(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`, opts);
   }
   async batchValues(id, ranges) {
     const qs = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
