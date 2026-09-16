@@ -9,7 +9,7 @@ import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHe
 import { loadReportCustomers } from './report/config.mjs';
 import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
 import { createJobWorker, enqueueJob, retryJob, syncStatus } from './adminSync/control.mjs';
-import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhook } from './adminSync/signature.mjs';
+import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
@@ -64,8 +64,11 @@ app.post('/auth/logout', (req, res) => { res.setHeader('Set-Cookie', clearSessio
 app.post('/api/admin/sync/webhook', asyncRoute(async (req, res) => {
   const timestamp = req.get(TIMESTAMP_HEADER);
   const signature = req.get(SIGNATURE_HEADER);
-  if (!verifyWebhook({ secret: process.env.ADMIN_SYNC_WEBHOOK_SECRET, timestamp, signature, body: req.rawBody || '' })) {
-    return res.status(401).json({ ok: false, error: 'Invalid or expired webhook signature' });
+  const verification = verifyWebhookDetailed({ secret: process.env.ADMIN_SYNC_WEBHOOK_SECRET, timestamp, signature, body: req.rawBody });
+  if (!verification.ok) {
+    // Deliberately log and return only a bounded reason code. Never include secret, body, token, or signature.
+    console.warn(`[admin-sync] webhook rejected: ${verification.reason}`);
+    return res.status(401).json({ ok: false, error: 'Invalid or expired webhook signature', reason: verification.reason });
   }
   const result = await appWithDb(db => enqueueJob(db, {
     action: req.body?.action,

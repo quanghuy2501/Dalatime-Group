@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createApp } from '../src/server.mjs';
 import { ACTIONS, createActionRunner, createJobWorker, enqueueJob, isAllowedAction } from '../src/adminSync/control.mjs';
-import { signWebhook, verifyWebhook } from '../src/adminSync/signature.mjs';
+import { signWebhook, verifyWebhook, verifyWebhookDetailed } from '../src/adminSync/signature.mjs';
 
 test('HMAC signs exact body and rejects tampering, wrong secret, and stale timestamps', () => {
   const timestamp = '1760000000000', body = '{"action":"direct_nv_sync"}', secret = 'test-secret-with-enough-entropy';
@@ -12,6 +12,23 @@ test('HMAC signs exact body and rejects tampering, wrong secret, and stale times
   assert.equal(verifyWebhook({ secret, timestamp, body: body + ' ', signature, now: Number(timestamp) }), false);
   assert.equal(verifyWebhook({ secret: 'wrong', timestamp, body, signature, now: Number(timestamp) }), false);
   assert.equal(verifyWebhook({ secret, timestamp, body, signature, now: Number(timestamp) + 300001 }), false);
+});
+
+test('Apps Script bridge byte-to-hex HMAC is accepted without body normalization', () => {
+  const timestamp = '1760000000000';
+  const body = JSON.stringify({ action: 'direct_nv_sync', idempotencyKey: 'bridge-key' });
+  const secret = 'bridge-secret';
+  const signature = signWebhook({ secret, timestamp, body });
+  assert.deepEqual(verifyWebhookDetailed({ secret, timestamp, body, signature, now: Number(timestamp) }), { ok: true, reason: null });
+  assert.deepEqual(verifyWebhookDetailed({ secret, timestamp, body: `${body}\\n`, signature, now: Number(timestamp) }), { ok: false, reason: 'signature_mismatch' });
+});
+
+test('webhook verifier exposes only safe reason codes', () => {
+  const common = { timestamp: '1760000000000', body: '{}', now: 1760000000000 };
+  assert.equal(verifyWebhookDetailed({ ...common, signature: '00' }).reason, 'secret_missing');
+  assert.equal(verifyWebhookDetailed({ ...common, secret: 's', signature: '00' }).reason, 'signature_format');
+  assert.equal(verifyWebhookDetailed({ ...common, secret: 's', timestamp: 'bad', signature: '0'.repeat(64) }).reason, 'timestamp_invalid/stale');
+  assert.equal(verifyWebhookDetailed({ ...common, secret: 's', body: '', signature: '0'.repeat(64) }).reason, 'body_missing');
 });
 
 test('action allowlist contains only the four documented actions', () => {
