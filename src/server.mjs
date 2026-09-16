@@ -106,7 +106,18 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   const reportLinks = loadReportLinks();
   res.json({ clients: clients.map(item => ({ ...item, configured: configured.has(item.client_code), reportPath: reportLinks.get(item.client_code) || null })), operation: 'npm run portal:token -- <CLIENT_CODE>' });
 }));
-app.get('/api/admin/sync/status', asyncRoute(async (req, res) => res.json({ ok: true, ...(await appWithDb(db => syncStatus(db))) })));
+app.get('/api/admin/sync/status', asyncRoute(async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await appWithDb(db => syncStatus(db))) });
+  } catch (error) {
+    // Keep the admin UI actionable when the control-plane migration is absent or DB is unavailable.
+    // Never expose SQL, connection strings, or provider details to the browser.
+    const message = String(error?.message || '').toLowerCase();
+    const migrationMissing = message.includes('admin_sync_jobs') || message.includes('nv_ingestion_checkpoints');
+    console.error(`[admin-sync] status unavailable: ${error?.message || 'unknown error'}`);
+    res.status(503).json({ ok: false, error: migrationMissing ? 'Admin sync database migration is not installed' : 'Admin sync status temporarily unavailable', code: migrationMissing ? 'ADMIN_SYNC_MIGRATION_REQUIRED' : 'ADMIN_SYNC_STATUS_UNAVAILABLE' });
+  }
+}));
 app.post('/api/admin/sync/actions', asyncRoute(async (req, res) => {
   const result = await appWithDb(db => enqueueJob(db, {
     action: req.body?.action,

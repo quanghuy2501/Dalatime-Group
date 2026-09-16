@@ -398,7 +398,14 @@ const syncTime = value => value ? new Date(value).toLocaleString('vi-VN') : '—
 const syncPill = status => `<span class="pill ${status === 'failed' ? 'bad' : status === 'running' || status === 'queued' ? 'warn' : ''}">${esc(status || '—')}</span>`;
 
 async function syncView() {
-  const x = await api('/api/admin/sync/status');
+  let x;
+  try {
+    x = await api('/api/admin/sync/status');
+  } catch (error) {
+    clearTimeout(syncPoll);
+    const message = error?.message || 'Không thể tải trạng thái hàng đợi.';
+    return `<div class="panel"><h2>Đồng bộ tạm thời chưa khả dụng</h2><p class="error-text">${esc(message)}</p><p class="muted">Kiểm tra migration admin sync trên Render hoặc thử tải lại sau ít phút. Không có tác vụ nào được khởi chạy.</p></div>`;
+  }
   const busy = (x.jobs || []).some(job => ['queued', 'running'].includes(job.status));
   clearTimeout(syncPoll);
   if (busy && tab === 'sync') syncPoll = setTimeout(() => reRenderContent(), 5000);
