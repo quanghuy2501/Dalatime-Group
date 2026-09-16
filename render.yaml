@@ -31,6 +31,10 @@ services:
         sync: false
       - key: DASHBOARD_BASIC_PASS
         sync: false
+      - key: ADMIN_SYNC_WEBHOOK_SECRET
+        sync: false
+      - key: CONFIG_PUSH_PRODUCTION
+        value: "0"
 
   # Scheduled, pay-per-run automation. No always-on worker or persistent disk.
   - type: cron

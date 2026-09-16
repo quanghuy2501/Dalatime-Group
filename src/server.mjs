@@ -8,6 +8,8 @@ import { authMiddleware, credentialsMatch, createSessionCookie, clearSessionCook
 import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHealth, getTimeseries, getIssues, getIssueTypes, getMasters, getAlerts, getHeatmap } from './db/queries.mjs';
 import { loadReportCustomers } from './report/config.mjs';
 import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
+import { createJobWorker, enqueueJob, retryJob, syncStatus } from './adminSync/control.mjs';
+import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhook } from './adminSync/signature.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
@@ -30,8 +32,10 @@ function validRange(query) {
   return date(query.from) && date(query.to) && !(query.from && query.to && query.from > query.to);
 }
 
-export function createApp({ dbConnector = connectDb, reportCustomers } = {}) {
+export function createApp({ dbConnector = connectDb, reportCustomers, jobWorker } = {}) {
 const app = express();
+jobWorker ||= createJobWorker({ dbConnector });
+app.locals.jobWorker = jobWorker;
 if (reportCustomers === undefined) {
   try { reportCustomers = loadReportCustomers(); }
   catch (error) { console.error(`Report config unavailable: ${error.message}`); reportCustomers = []; }
@@ -47,7 +51,7 @@ const appWithDb = async fn => {
   try { return await fn(db); } finally { await db.end(); }
 };
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ verify: (req, _res, buffer) => { req.rawBody = buffer.toString('utf8'); } }));
 app.use(express.urlencoded({ extended: false }));
 app.get('/login', (req, res) => res.sendFile(path.join(publicDir, 'login.html')));
 app.post('/auth/login', (req, res) => {
@@ -57,6 +61,20 @@ app.post('/auth/login', (req, res) => {
   res.json({ ok: true, redirect: '/' });
 });
 app.post('/auth/logout', (req, res) => { res.setHeader('Set-Cookie', clearSessionCookie()); res.json({ ok: true }); });
+app.post('/api/admin/sync/webhook', asyncRoute(async (req, res) => {
+  const timestamp = req.get(TIMESTAMP_HEADER);
+  const signature = req.get(SIGNATURE_HEADER);
+  if (!verifyWebhook({ secret: process.env.ADMIN_SYNC_WEBHOOK_SECRET, timestamp, signature, body: req.rawBody || '' })) {
+    return res.status(401).json({ ok: false, error: 'Invalid or expired webhook signature' });
+  }
+  const result = await appWithDb(db => enqueueJob(db, {
+    action: req.body?.action,
+    idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
+    requestedBy: 'apps-script-webhook'
+  }));
+  jobWorker.kick();
+  res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
+}));
 app.use(authMiddleware);
 app.use('/report', createReportRouter({ customers: reportCustomers, withDb: appWithDb, publicDir }));
 app.use('/api/report', createReportApiRouter({ customers: reportCustomers, withDb: appWithDb }));
@@ -88,6 +106,21 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   const reportLinks = loadReportLinks();
   res.json({ clients: clients.map(item => ({ ...item, configured: configured.has(item.client_code), reportPath: reportLinks.get(item.client_code) || null })), operation: 'npm run portal:token -- <CLIENT_CODE>' });
 }));
+app.get('/api/admin/sync/status', asyncRoute(async (req, res) => res.json({ ok: true, ...(await appWithDb(db => syncStatus(db))) })));
+app.post('/api/admin/sync/actions', asyncRoute(async (req, res) => {
+  const result = await appWithDb(db => enqueueJob(db, {
+    action: req.body?.action,
+    idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
+    requestedBy: 'dashboard-session'
+  }));
+  jobWorker.kick();
+  res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
+}));
+app.post('/api/admin/sync/jobs/:id/retry', asyncRoute(async (req, res) => {
+  const result = await appWithDb(db => retryJob(db, req.params.id, 'dashboard-session'));
+  jobWorker.kick();
+  res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
+}));
 
 app.get('/api/health', asyncRoute(async (req, res) => res.json(await appWithDb(db => getHealth(db, asInt(req.query.limit, 100))))));
 app.get('/api/dashboard', asyncRoute(async (req, res) => {
@@ -117,7 +150,7 @@ app.get('/api/dashboard', asyncRoute(async (req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('Request failed:', err?.message || 'Unknown error');
-  res.status(500).json({ ok: false, error: 'Internal server error' });
+  res.status(err.statusCode || 500).json({ ok: false, error: err.statusCode ? err.message : 'Internal server error' });
 });
 
 return app;
@@ -125,5 +158,5 @@ return app;
 
 export const app = createApp();
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  app.listen(port, () => console.log(`Onicorn Dashboard API listening on http://localhost:${port}`));
+  app.listen(port, () => { console.log(`Onicorn Dashboard API listening on http://localhost:${port}`); app.locals.jobWorker.kick(); });
 }

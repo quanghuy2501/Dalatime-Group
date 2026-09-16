@@ -13,7 +13,7 @@ const dateFlag = s => isFuture(s) ? ' <span class="pill warn" title="Ngày đăn
 // Render may cold-start the service and establish a DB connection on the first request.
 // Keep the real error visible while allowing that bounded startup window.
 const REQUEST_TIMEOUT = 30000;
-const TAB_LABELS = { overview: '🏠 Tổng quan', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng' };
+const TAB_LABELS = { overview: '🏠 Tổng quan', sync: '🔄 Đồng bộ', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng' };
 const RANGE_PRESETS = [['7d', '7 ngày'], ['14d', '14 ngày'], ['30d', '30 ngày'], ['90d', '90 ngày'], ['all', 'Tất cả']];
 
 let tab = (location.hash || '').replace('#', '');
@@ -46,6 +46,13 @@ async function api(path, extra = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function apiPost(path, body = {}) {
+  const r = await fetch(path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const payload = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(payload.error || `HTTP ${r.status}`);
+  return payload;
 }
 
 let toastTimer = null;
@@ -380,6 +387,35 @@ async function links() {
   ])}</div>`;
 }
 
+const SYNC_ACTIONS = [
+  ['config_push', 'Đẩy CONFIG tới NV', 'Chỉ ghi bốn vùng CONFIG được allowlist; các cờ production vẫn bắt buộc.'],
+  ['direct_nv_sync', 'Đồng bộ NV → DB', 'Đọc trực tiếp file NV và xuất bản snapshot DB theo transaction.'],
+  ['report_refresh_reconcile', 'Làm mới / đối soát report', 'Đối soát nguồn lỗi và số liệu phục vụ report trực tiếp từ DB.'],
+  ['full_pipeline', 'Chạy toàn bộ pipeline', 'Chạy tuần tự CONFIG → NV → DB → đối soát; dừng ngay khi một bước lỗi.']
+];
+let syncPoll = null;
+const syncTime = value => value ? new Date(value).toLocaleString('vi-VN') : '—';
+const syncPill = status => `<span class="pill ${status === 'failed' ? 'bad' : status === 'running' || status === 'queued' ? 'warn' : ''}">${esc(status || '—')}</span>`;
+
+async function syncView() {
+  const x = await api('/api/admin/sync/status');
+  const busy = (x.jobs || []).some(job => ['queued', 'running'].includes(job.status));
+  clearTimeout(syncPoll);
+  if (busy && tab === 'sync') syncPoll = setTimeout(() => reRenderContent(), 5000);
+  const latest = x.latest;
+  return `<div class="sync-warning">Các nút dưới đây có thể ghi dữ liệu production. Mỗi lần chạy cần xác nhận; hệ thống khóa trùng và xếp hàng trên server.</div>
+    <div class="sync-actions">${SYNC_ACTIONS.map(([action, title, description]) => `<div class="panel sync-card"><h2>${esc(title)}</h2><p>${esc(description)}</p><button class="button ${action === 'full_pipeline' ? 'primary' : 'secondary'}" data-sync-action="${action}" ${busy ? 'disabled' : ''}>Chạy tác vụ</button></div>`).join('')}</div>
+    <div class="grid2">
+      <div class="panel"><h2>Lần chạy mới nhất</h2>${latest ? `<div class="sync-latest"><b>${esc(latest.action)}</b>${syncPill(latest.status)}<span>Yêu cầu: ${syncTime(latest.created_at)}</span><span>Hoàn tất: ${syncTime(latest.finished_at)}</span>${latest.error ? `<div class="error-text">${esc(latest.error)}</div>` : ''}</div>` : '<p class="empty">Chưa có lần chạy thủ công.</p>'}</div>
+      <div class="panel"><h2>Nguồn thất bại gần nhất</h2>${table(x.failedSources || [], [['nv_id', 'NV'], ['google_file_id', 'File'], ['error', 'Lỗi'], [r => syncTime(r.updated_at), 'Cập nhật']])}</div>
+    </div>
+    <div class="panel"><h2>Lịch sử và log</h2>${table(x.jobs || [], [
+      ['action', 'Tác vụ'], [r => syncPill(r.status), 'Trạng thái'], [r => syncTime(r.created_at), 'Yêu cầu'], [r => syncTime(r.finished_at), 'Hoàn tất'],
+      [r => esc((r.logs || []).slice(-1)[0]?.message || r.error || '—'), 'Log cuối'],
+      [r => r.status === 'failed' ? `<button class="button small" data-retry-job="${esc(r.id)}">Thử lại</button>` : '—', 'Thao tác']
+    ])}</div>`;
+}
+
 // ---- Render / event wiring ----
 async function render() {
   nav();
@@ -391,6 +427,7 @@ async function render() {
   let html = '';
   try {
     if (tab === 'overview') html = await overview();
+    else if (tab === 'sync') html = await syncView();
     else if (tab === 'alerts') html = alertsView();
     else if (tab === 'brand') html = brand();
     else if (tab === 'staff') html = staff();
@@ -434,6 +471,25 @@ function wireContentEvents() {
   const retry = $('#retryBtn');
   if (retry) retry.onclick = () => load(true);
   wireHeatmapRetry();
+
+  document.querySelectorAll('[data-sync-action]').forEach(button => button.onclick = async () => {
+    const action = button.dataset.syncAction;
+    const label = SYNC_ACTIONS.find(item => item[0] === action)?.[1] || action;
+    if (!window.confirm(`Xác nhận chạy production: ${label}?`)) return;
+    button.disabled = true;
+    try {
+      const idempotencyKey = `${action}:${Date.now()}:${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+      const result = await apiPost('/api/admin/sync/actions', { action, idempotencyKey });
+      toast(result.duplicate ? 'Tác vụ đã tồn tại; không tạo bản chạy trùng.' : 'Đã xếp hàng tác vụ.', 'ok');
+      await reRenderContent();
+    } catch (error) { toast('Không thể chạy: ' + error.message, 'error'); button.disabled = false; }
+  });
+  document.querySelectorAll('[data-retry-job]').forEach(button => button.onclick = async () => {
+    if (!window.confirm('Xác nhận thử lại tác vụ thất bại này?')) return;
+    button.disabled = true;
+    try { await apiPost(`/api/admin/sync/jobs/${encodeURIComponent(button.dataset.retryJob)}/retry`); toast('Đã xếp hàng chạy lại.', 'ok'); await reRenderContent(); }
+    catch (error) { toast('Không thể thử lại: ' + error.message, 'error'); button.disabled = false; }
+  });
 
   if (tab === 'posts') {
     const applyBtn = $('#pApply');
