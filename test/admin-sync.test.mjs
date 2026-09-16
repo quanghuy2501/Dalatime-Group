@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createApp } from '../src/server.mjs';
-import { ACTIONS, createActionRunner, createJobWorker, enqueueJob, isAllowedAction } from '../src/adminSync/control.mjs';
+import { ACTIONS, createActionRunner, createJobWorker, enqueueJob, isAllowedAction, isAllowedWebhookAction, WEBHOOK_ACTIONS } from '../src/adminSync/control.mjs';
 import { signWebhook, verifyWebhook, verifyWebhookDetailed } from '../src/adminSync/signature.mjs';
 
 test('HMAC signs exact body and rejects tampering, wrong secret, and stale timestamps', () => {
@@ -34,7 +34,11 @@ test('webhook verifier exposes only safe reason codes', () => {
 test('action allowlist contains only the four documented actions', () => {
   assert.deepEqual(ACTIONS, ['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
   for (const action of ACTIONS) assert.equal(isAllowedAction(action), true);
+  assert.deepEqual(WEBHOOK_ACTIONS, [...ACTIONS, 'status']);
+  assert.equal(isAllowedWebhookAction('status'), true);
+  assert.equal(isAllowedAction('status'), false);
   assert.equal(isAllowedAction('shell'), false);
+  assert.equal(isAllowedWebhookAction('shell'), false);
 });
 
 test('enqueue uses transaction lock and returns existing idempotent job', async () => {
@@ -72,20 +76,37 @@ test('full pipeline maps to the three actions in safe order', async () => {
 test('admin endpoints preserve session auth and signed webhook is independently authenticated', async t => {
   const previous = Object.fromEntries(['NODE_ENV','DASHBOARD_BASIC_USER','DASHBOARD_BASIC_PASS','AUTH_SESSION_SECRET','ADMIN_SYNC_WEBHOOK_SECRET'].map(k => [k, process.env[k]]));
   Object.assign(process.env, { NODE_ENV: 'production', DASHBOARD_BASIC_USER: 'admin', DASHBOARD_BASIC_PASS: 'pass', AUTH_SESSION_SECRET: 'session-secret', ADMIN_SYNC_WEBHOOK_SECRET: 'webhook-secret' });
+  let inserts = 0, kicks = 0;
   const db = { query: async sql => {
+    if (sql.includes("count(*) filter (where status='queued')")) return { rows: [{ total: 9, queued: 2, running: 1, succeeded: 5, failed: 1, latest_job_at: '2026-09-16T00:00:00Z', latest_success_at: '2026-09-15T00:00:00Z' }] };
     if (sql.includes('where action=$1 and idempotency_key=$2') || sql.includes("status in ('queued','running')")) return { rows: [] };
-    if (sql.includes('insert into admin_sync_jobs')) return { rows: [{ id: 'job-1', action: 'direct_nv_sync', status: 'queued' }] };
+    if (sql.includes('insert into admin_sync_jobs')) { inserts++; return { rows: [{ id: 'job-1', action: 'direct_nv_sync', status: 'queued' }] }; }
     return { rows: [] };
   }, end: async () => {} };
-  const app = createApp({ dbConnector: async () => db, reportCustomers: [], jobWorker: { kick() {} } });
+  const app = createApp({ dbConnector: async () => db, reportCustomers: [], jobWorker: { kick() { kicks++; } } });
   const server = app.listen(0); t.after(() => { server.close(); for (const [key,value] of Object.entries(previous)) value === undefined ? delete process.env[key] : process.env[key] = value; });
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await fetch(`${base}/api/admin/sync/status`)).status, 401);
   const body = JSON.stringify({ action: 'direct_nv_sync', idempotencyKey: 'webhook-key' });
   const timestamp = String(Date.now());
   assert.equal((await fetch(`${base}/api/admin/sync/webhook`, { method: 'POST', headers: { 'content-type':'application/json', 'x-sync-timestamp':timestamp, 'x-sync-signature':'0'.repeat(64) }, body })).status, 401);
+  const statusBody = JSON.stringify({ action: 'status' });
+  const statusSignature = signWebhook({ secret: 'webhook-secret', timestamp, body: statusBody });
+  const statusResponse = await fetch(`${base}/api/admin/sync/webhook`, { method: 'POST', headers: { 'content-type':'application/json', 'x-sync-timestamp':timestamp, 'x-sync-signature':statusSignature }, body: statusBody });
+  assert.equal(statusResponse.status, 200);
+  assert.deepEqual((await statusResponse.json()).queue, { queued: 2, running: 1 });
+  assert.equal(inserts, 0); assert.equal(kicks, 0);
   const signature = signWebhook({ secret: 'webhook-secret', timestamp, body });
   assert.equal((await fetch(`${base}/api/admin/sync/webhook`, { method: 'POST', headers: { 'content-type':'application/json', 'x-sync-timestamp':timestamp, 'x-sync-signature':signature }, body })).status, 202);
+  assert.equal(inserts, 1); assert.equal(kicks, 1);
+});
+
+test('Apps Script exposes a signed read-only status menu action', () => {
+  const source = fs.readFileSync(new URL('../apps-script/RenderSyncBridge.gs', import.meta.url), 'utf8');
+  assert.match(source, /addItem\('Kiểm tra trạng thái', 'checkRenderStatus'\)/);
+  assert.match(source, /callRenderWebhook_\('status', null\)/);
+  assert.match(source, /computeHmacSha256Signature/);
+  assert.doesNotMatch(source, /function checkRenderStatus\(\)[\s\S]*?enqueueRenderSync_\('status'\)/);
 });
 
 test('dashboard UI maps every API action and exposes status, failures, and retry', () => {

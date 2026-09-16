@@ -3,7 +3,10 @@ import { executeConfigPush } from '../configPush/runner.mjs';
 import { runDirectNvIngestion } from '../ingestion/directNvRunner.mjs';
 
 export const ACTIONS = Object.freeze(['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
+export const WEBHOOK_STATUS_ACTION = 'status';
+export const WEBHOOK_ACTIONS = Object.freeze([...ACTIONS, WEBHOOK_STATUS_ACTION]);
 export const isAllowedAction = action => ACTIONS.includes(action);
+export const isAllowedWebhookAction = action => WEBHOOK_ACTIONS.includes(action);
 const clean = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 2000);
 
 export async function enqueueJob(db, { action, idempotencyKey, requestedBy }) {
@@ -112,6 +115,32 @@ export async function syncStatus(db, limit = 25) {
     join sync_runs r on r.id=c.run_id where c.status='fail' and r.id=(select id from sync_runs where run_type='direct_nv_ingestion' order by started_at desc limit 1)
     order by c.updated_at desc`)).rows;
   return { actions: ACTIONS, latest: jobs[0] || null, jobs, failedSources };
+}
+
+export async function webhookStatus(db) {
+  const result = await db.query(`select
+    count(*)::int as total,
+    count(*) filter (where status='queued')::int as queued,
+    count(*) filter (where status='running')::int as running,
+    count(*) filter (where status='succeeded')::int as succeeded,
+    count(*) filter (where status='failed')::int as failed,
+    max(created_at) as latest_job_at,
+    max(finished_at) filter (where status='succeeded') as latest_success_at
+    from admin_sync_jobs`);
+  const counts = result.rows[0] || {};
+  return {
+    service: 'ok',
+    database: 'ready',
+    checkedAt: new Date().toISOString(),
+    queue: { queued: Number(counts.queued || 0), running: Number(counts.running || 0) },
+    jobs: {
+      total: Number(counts.total || 0),
+      succeeded: Number(counts.succeeded || 0),
+      failed: Number(counts.failed || 0),
+      latestJobAt: counts.latest_job_at || null,
+      latestSuccessAt: counts.latest_success_at || null
+    }
+  };
 }
 
 export async function retryJob(db, id, requestedBy) {

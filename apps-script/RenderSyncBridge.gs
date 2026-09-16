@@ -13,6 +13,8 @@ function onOpen() {
     .addItem('Làm mới / đối soát report', 'syncReports')
     .addSeparator()
     .addItem('Chạy toàn bộ pipeline', 'syncFullPipeline')
+    .addSeparator()
+    .addItem('Kiểm tra trạng thái', 'checkRenderStatus')
     .addToUi();
 }
 
@@ -24,24 +26,54 @@ function syncFullPipeline() { return enqueueRenderSync_('full_pipeline'); }
 // Assign this function to a Sheet drawing/button if one-click access is desired.
 function syncButton() { return syncFullPipeline(); }
 
+function checkRenderStatus() {
+  const response = callRenderWebhook_('status', null);
+  const data = response.data;
+  const queue = data.queue || {};
+  const jobs = data.jobs || {};
+  const lines = [
+    `Dịch vụ: ${data.service === 'ok' ? 'hoạt động' : 'không xác định'}`,
+    `Cơ sở dữ liệu: ${data.database === 'ready' ? 'sẵn sàng' : 'không sẵn sàng'}`,
+    `Hàng đợi: ${safeCount_(queue.queued)} chờ, ${safeCount_(queue.running)} đang chạy`,
+    `Công việc: ${safeCount_(jobs.total)} tổng, ${safeCount_(jobs.succeeded)} thành công, ${safeCount_(jobs.failed)} lỗi`,
+    `Thành công gần nhất: ${safeDate_(jobs.latestSuccessAt)}`
+  ];
+  SpreadsheetApp.getUi().alert('Trạng thái Render', lines.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
 function enqueueRenderSync_(action) {
   if (Object.values(RENDER_ACTIONS).indexOf(action) === -1) throw new Error('Tác vụ không được phép.');
   const ui = SpreadsheetApp.getUi();
   if (ui.alert('Xác nhận', 'Tác vụ sẽ được xếp hàng và có thể ghi dữ liệu production. Tiếp tục?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  const idempotencyKey = `${action}:${Utilities.getUuid()}`;
+  callRenderWebhook_(action, idempotencyKey);
+  ui.alert('Đã xếp hàng', 'Theo dõi tiến độ tại Dashboard → Đồng bộ.', ui.ButtonSet.OK);
+}
+
+function callRenderWebhook_(action, idempotencyKey) {
+  const allowed = Object.values(RENDER_ACTIONS).concat(['status']);
+  if (allowed.indexOf(action) === -1) throw new Error('Tác vụ không được phép.');
   const props = PropertiesService.getScriptProperties();
   const baseUrl = String(props.getProperty('RENDER_ADMIN_BASE_URL') || '').replace(/\/$/, '');
   const secret = props.getProperty('RENDER_ADMIN_WEBHOOK_SECRET');
   if (!/^https:\/\//.test(baseUrl) || !secret) throw new Error('Thiếu cấu hình bridge trong Script Properties.');
   const timestamp = String(Date.now());
-  const idempotencyKey = `${action}:${Utilities.getUuid()}`;
-  const body = JSON.stringify({ action: action, idempotencyKey: idempotencyKey });
+  const payload = { action: action };
+  if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
+  const body = JSON.stringify(payload);
   const bytes = Utilities.computeHmacSha256Signature(`${timestamp}.${body}`, secret);
   const signature = bytes.map(function(byte) { const value = byte < 0 ? byte + 256 : byte; return (`0${value.toString(16)}`).slice(-2); }).join('');
   const response = UrlFetchApp.fetch(`${baseUrl}/api/admin/sync/webhook`, {
     method: 'post', contentType: 'application/json', payload: body, muteHttpExceptions: true,
-    headers: { 'X-Sync-Timestamp': timestamp, 'X-Sync-Signature': signature, 'Idempotency-Key': idempotencyKey }
+    headers: Object.assign({ 'X-Sync-Timestamp': timestamp, 'X-Sync-Signature': signature }, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
   });
   const code = response.getResponseCode();
   if (code < 200 || code >= 300) throw new Error(`Render từ chối yêu cầu (HTTP ${code}).`);
-  ui.alert('Đã xếp hàng', 'Theo dõi tiến độ tại Dashboard → Đồng bộ.', ui.ButtonSet.OK);
+  let data;
+  try { data = JSON.parse(response.getContentText()); } catch (_error) { throw new Error('Render trả về dữ liệu không hợp lệ.'); }
+  if (!data || data.ok !== true) throw new Error('Render không xác nhận yêu cầu.');
+  return { code: code, data: data };
 }
+
+function safeCount_(value) { const count = Number(value); return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0; }
+function safeDate_(value) { if (!value) return 'chưa có'; const date = new Date(value); return isNaN(date.getTime()) ? 'không xác định' : date.toLocaleString('vi-VN'); }

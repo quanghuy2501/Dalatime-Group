@@ -8,7 +8,7 @@ import { authMiddleware, credentialsMatch, createSessionCookie, clearSessionCook
 import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHealth, getTimeseries, getIssues, getIssueTypes, getMasters, getAlerts, getHeatmap } from './db/queries.mjs';
 import { loadReportCustomers } from './report/config.mjs';
 import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
-import { createJobWorker, enqueueJob, retryJob, syncStatus } from './adminSync/control.mjs';
+import { createJobWorker, enqueueJob, isAllowedWebhookAction, retryJob, syncStatus, WEBHOOK_STATUS_ACTION, webhookStatus } from './adminSync/control.mjs';
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -70,8 +70,19 @@ app.post('/api/admin/sync/webhook', asyncRoute(async (req, res) => {
     console.warn(`[admin-sync] webhook rejected: ${verification.reason}`);
     return res.status(401).json({ ok: false, error: 'Invalid or expired webhook signature', reason: verification.reason });
   }
+  const action = req.body?.action;
+  if (!isAllowedWebhookAction(action)) return res.status(400).json({ ok: false, error: 'Action is not allowlisted' });
+  if (action === WEBHOOK_STATUS_ACTION) {
+    try {
+      return res.json({ ok: true, ...(await appWithDb(webhookStatus)) });
+    } catch (error) {
+      // This signed response is intentionally bounded: do not expose SQL/provider/credential details.
+      console.error(`[admin-sync] webhook status unavailable: ${error?.message || 'unknown error'}`);
+      return res.status(503).json({ ok: false, service: 'ok', database: 'unavailable', error: 'Status temporarily unavailable' });
+    }
+  }
   const result = await appWithDb(db => enqueueJob(db, {
-    action: req.body?.action,
+    action,
     idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
     requestedBy: 'apps-script-webhook'
   }));
