@@ -1,5 +1,5 @@
 import { connectDb } from '../db/postgres.mjs';
-import { CONFIG_RANGE, createConfigPushApi, isPushSourceActive, runConfigPush, snapshotConfig } from './configPush.mjs';
+import { createConfigPushApi, isPushSourceActive, readMasterConfig, runConfigPush } from './configPush.mjs';
 
 const json = value => JSON.stringify(value);
 
@@ -10,11 +10,11 @@ async function registry(db) {
 async function masterSnapshot(api) {
   const id = process.env.MASTER_SPREADSHEET_ID;
   if (!id) throw new Error('MASTER_SPREADSHEET_ID is required');
-  const [meta, values] = await Promise.all([
+  const [meta, snapshot] = await Promise.all([
     api.fetchJson(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,modifiedTime&supportsAllDrives=true`),
-    api.values(id, CONFIG_RANGE)
+    readMasterConfig(api, id)
   ]);
-  return snapshotConfig(values.values || [], meta.modifiedTime || null);
+  return { ...snapshot, modifiedTime: meta.modifiedTime || null };
 }
 
 export async function executeConfigPush({ production = false, db, api, log = console.log } = {}) {
@@ -36,12 +36,12 @@ export async function executeConfigPush({ production = false, db, api, log = con
     if (production) {
       runId = (await db.query(`insert into config_push_runs(mode,status,snapshot_version,snapshot_hash,files_total) values('production','running',$1,$2,$3) returning id`, [snapshot.version,snapshot.hash,sources.length])).rows[0].id;
     }
-    const loadCheckpoint = production ? async source => (await db.query(`select snapshot_hash,stage from config_push_file_audit where run_id=(select id from config_push_runs where mode='production' and snapshot_hash=$1 and status in ('partial','failed') order by started_at desc limit 1) and google_file_id=$2`, [snapshot.hash,source.google_file_id])).rows[0] || null : async () => null;
-    const saveCheckpoint = production ? async ({ source, snapshot: snap, stage }) => db.query(`insert into config_push_file_audit(run_id,nv_id,google_file_id,snapshot_hash,stage,status) values($1,$2,$3,$4,$5,'running') on conflict(run_id,google_file_id) do update set stage=excluded.stage,snapshot_hash=excluded.snapshot_hash,updated_at=now()`, [runId,source.nv_id,source.google_file_id,snap.hash,stage]) : async () => {};
+    const loadCheckpoint = production ? async source => (await db.query(`select snapshot_hash,stage,completed_sections from config_push_file_audit where run_id=(select id from config_push_runs where mode='production' and snapshot_hash=$1 and status in ('partial','failed') order by started_at desc limit 1) and google_file_id=$2`, [snapshot.hash,source.google_file_id])).rows[0] || null : async () => null;
+    const saveCheckpoint = production ? async ({ source, snapshot: snap, stage, completedSections=[] }) => db.query(`insert into config_push_file_audit(run_id,nv_id,google_file_id,snapshot_hash,stage,status,completed_sections) values($1,$2,$3,$4,$5,'running',$6) on conflict(run_id,google_file_id) do update set stage=excluded.stage,snapshot_hash=excluded.snapshot_hash,completed_sections=excluded.completed_sections,updated_at=now()`, [runId,source.nv_id,source.google_file_id,snap.hash,stage,json(completedSections)]) : async () => {};
     const result = await runConfigPush({ api, sources, snapshot, production, concurrency: Number(process.env.CONFIG_PUSH_CONCURRENCY || 2), timeoutMs: Number(process.env.CONFIG_PUSH_FILE_TIMEOUT_MS || 120000), loadCheckpoint, saveCheckpoint,
       onResult: ({ fileId: _fileId, ...item }) => log(json({ job:'config_push', mode:production?'production':'dry-run', ...item })) });
     if (production) {
-      for (const item of result.results) await db.query(`insert into config_push_file_audit(run_id,nv_id,google_file_id,snapshot_hash,stage,status,writes,error,duration_ms) values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict(run_id,google_file_id) do update set stage=excluded.stage,status=excluded.status,writes=excluded.writes,error=excluded.error,duration_ms=excluded.duration_ms,updated_at=now()`, [runId,item.nvId,item.fileId,snapshot.hash,item.status==='failed'?'failed':'complete',item.status,item.writes,item.error||null,item.durationMs||null]);
+      for (const item of result.results) await db.query(`insert into config_push_file_audit(run_id,nv_id,google_file_id,snapshot_hash,stage,status,writes,error,duration_ms,section_diff) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict(run_id,google_file_id) do update set stage=excluded.stage,status=excluded.status,writes=excluded.writes,error=excluded.error,duration_ms=excluded.duration_ms,section_diff=excluded.section_diff,updated_at=now()`, [runId,item.nvId,item.fileId,snapshot.hash,item.status==='failed'?'failed':'complete',item.status,item.writes,item.error||null,item.durationMs||null,json(item.diffs||[])]);
       const status=result.counts.failed ? 'partial' : 'ok';
       await db.query(`update config_push_runs set status=$2,files_ok=$3,files_fail=$4,writes=$5,finished_at=now(),summary=$6 where id=$1`, [runId,status,result.active-result.counts.failed,result.counts.failed,result.results.reduce((sum,x)=>sum+x.writes,0),json(result.counts)]);
       result.runId=runId; result.status=status;

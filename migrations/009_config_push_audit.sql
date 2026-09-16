@@ -20,11 +20,19 @@ create table if not exists config_push_file_audit (
   nv_id text not null,
   google_file_id text not null,
   snapshot_hash text not null check (snapshot_hash ~ '^[0-9a-f]{64}$'),
-  stage text not null check (stage in ('config_written','complete','failed')),
+  stage text not null check (stage in ('sections_writing','complete','failed')),
   status text not null,
   writes integer not null default 0,
   error text,
   duration_ms integer,
+  completed_sections jsonb not null default '[]'::jsonb,
+  section_diff jsonb,
   updated_at timestamptz not null default now(),
   primary key (run_id,google_file_id)
 );
+
+alter table config_push_file_audit add column if not exists completed_sections jsonb not null default '[]'::jsonb;
+alter table config_push_file_audit add column if not exists section_diff jsonb;
+alter table config_push_file_audit drop constraint if exists config_push_file_audit_stage_check;
+update config_push_file_audit set stage='sections_writing' where stage='config_written';
+alter table config_push_file_audit add constraint config_push_file_audit_stage_check check (stage in ('sections_writing','complete','failed'));
