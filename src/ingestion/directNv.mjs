@@ -203,13 +203,15 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
   });
   const failures=groups.filter(group=>group?.error);
   const empty=groups.filter(group=>group?.empty).length;
-  const rows=groups.filter(Array.isArray).flat(); const keys=new Set();
-  for (const row of rows) { if (keys.has(row.row_key)) throw new Error(`duplicate idempotency key: ${row.row_key}`); keys.add(row.row_key); }
-  Object.defineProperty(rows,'diagnostics',{value:{successful:sources.length-empty-failures.length,empty,failed:failures.length,total:sources.length,
+  const rows=groups.filter(group=>Array.isArray(group)).flat();
+  const unique = new Map(); let duplicate = 0;
+  for (const row of rows) { if (unique.has(row.row_key)) { duplicate += 1; continue; } unique.set(row.row_key,row); }
+  const deduped=[...unique.values()];
+  Object.defineProperty(deduped,'diagnostics',{value:{successful:sources.length-empty-failures.length,empty,failed:failures.length,duplicate,total:sources.length,
     errors:failures.map(group=>({nv_id:group.source?.nv_id,message:String(group.error?.message||group.error)})),
     failed_sources:failures.map(group=>group.source),
     fresh_source_ids:groups.flatMap((group,i)=>Array.isArray(group)||group?.empty?[sources[i].google_file_id]:[])},enumerable:false});
-  return rows;
+  return deduped;
 }
 
 export async function createReadonlyApi() {
