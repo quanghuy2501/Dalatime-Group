@@ -68,11 +68,30 @@ function callRenderWebhook_(action, idempotencyKey) {
     headers: Object.assign({ 'X-Sync-Timestamp': timestamp, 'X-Sync-Signature': signature }, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
   });
   const code = response.getResponseCode();
-  if (code < 200 || code >= 300) throw new Error(`Render từ chối yêu cầu (HTTP ${code}).`);
+  if (code < 200 || code >= 300) {
+    throw new Error(formatRenderError_(code, response.getContentText()));
+  }
   let data;
   try { data = JSON.parse(response.getContentText()); } catch (_error) { throw new Error('Render trả về dữ liệu không hợp lệ.'); }
   if (!data || data.ok !== true) throw new Error('Render không xác nhận yêu cầu.');
   return { code: code, data: data };
+}
+
+function formatRenderError_(httpCode, responseText) {
+  const details = {};
+  try {
+    const parsed = JSON.parse(String(responseText || ''));
+    ['error', 'reason', 'code'].forEach(function(key) {
+      if (parsed && Object.prototype.hasOwnProperty.call(parsed, key)) {
+        const value = parsed[key];
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') details[key] = String(value);
+      }
+    });
+  } catch (_error) {
+    // Do not expose a raw response body. The HTTP status is still useful below.
+  }
+  const fields = Object.keys(details).map(function(key) { return `${key}: ${details[key]}`; });
+  return `Render từ chối yêu cầu (HTTP ${httpCode})${fields.length ? ` - ${fields.join('; ')}` : '.'}`;
 }
 
 function safeCount_(value) { const count = Number(value); return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0; }
