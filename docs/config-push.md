@@ -1,6 +1,6 @@
 # Master CONFIG push worker
 
-The worker snapshots exactly `'CONFIG'!A1:H20` from the Master spreadsheet, pads it to a deterministic 20×8 grid, and derives a SHA-256 hash plus a short version. Targets come only from `nv_ingestion_sources`; there are no hard-coded employee IDs. A blank status is active, while `inactive`, `disabled`, `retired`, `archived`, and `offboarded` are skipped.
+The worker snapshots exactly `'CONFIG'!A1:H20` from the Master spreadsheet, pads it to a deterministic 20×8 grid, and derives a SHA-256 hash plus a short version. Targets come only from `nv_ingestion_sources`; there are no hard-coded employee IDs. The registry persists authoritative Master `2. NHAN SU`.`TÌNH TRẠNG`: `Đang làm` and blank are active, while `Đã nghỉ`, `inactive`, `disabled`, `retired`, `archived`, and `offboarded` are skipped. Sources absent from Master are also skipped. Direct ingestion and config push use the same resolver.
 
 Dry-run is the default:
 

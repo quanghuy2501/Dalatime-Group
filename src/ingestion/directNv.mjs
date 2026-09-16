@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { GoogleApi } from '../google/googleApi.mjs';
+import { isRegisteredSourceActive } from '../staffStatus.mjs';
 import { parseBoolVN, parseDateAny, parseNumberVN, normalizeUrl, splitBrands, engagementRateFromMetrics } from '../utils/normalize.mjs';
 
 export const NV_SHEET = 'BAO CAO HANG NGAY';
@@ -33,12 +34,7 @@ export async function withTimeout(operation, timeoutMs, scope) {
     ]);
   } finally { clearTimeout(timer); }
 }
-const INACTIVE_STATUSES = new Set(['inactive','disabled','retired','archived','offboarded']);
-export const isSourceActive = source => {
-  const status=clean(source?.status).toLocaleLowerCase('und');
-  if (status) return !INACTIVE_STATUSES.has(status);
-  return source?.active !== false;
-};
+export const isSourceActive = isRegisteredSourceActive;
 
 export function validateMapping(mapping = COLUMN_MAPPING) {
   if (!Array.isArray(mapping) || mapping.length !== 22) throw new Error(`mapping mismatch: expected exactly 22 columns, got ${mapping?.length ?? 0}`);
@@ -89,7 +85,7 @@ export function loadRegistryFile(file) {
 }
 
 export async function discoverSources(db, registryFile = process.env.NV_SOURCE_REGISTRY) {
-  const sources = registryFile ? loadRegistryFile(registryFile) : (await db.query(`select nv_id,google_file_id,sheet_name,status,active,expected_columns from nv_ingestion_sources order by nv_id`)).rows;
+  const sources = registryFile ? loadRegistryFile(registryFile) : (await db.query(`select nv_id,google_file_id,sheet_name,status,active,master_registry_present,expected_columns from nv_ingestion_sources order by nv_id`)).rows;
   const master = clean(process.env.MASTER_SPREADSHEET_ID || '1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0');
   const seen = new Set();
   return sources.filter(source => {

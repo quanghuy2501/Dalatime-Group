@@ -1,17 +1,8 @@
 import { GoogleApi } from '../google/googleApi.mjs';
 import { parseNumberVN, parseBoolVN, parseDateAny, sha256, normalizeUrl, splitBrands, engagementRateFromMetrics } from '../utils/normalize.mjs';
+import { resolveStaffStatus } from '../staffStatus.mjs';
 
 export const MASTER_ID = process.env.MASTER_SPREADSHEET_ID || '1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0';
-const INACTIVE_STAFF_IDS = new Set(
-  String(process.env.INACTIVE_STAFF_IDS || '')
-    .split(',')
-    .map(id => id.trim().toUpperCase())
-    .filter(Boolean)
-);
-
-function isInactiveStatus(value) {
-  return /inactive|nghỉ|nghi|đã nghỉ|da nghi|ngưng|ngung|off|disabled/i.test(String(value ?? '').trim());
-}
 
 function nonempty(rows) { return (rows || []).filter(r => r.some(c => String(c ?? '').trim())); }
 function findHeader(rows, expected) {
@@ -56,7 +47,7 @@ export function mapClient(o) {
 export function mapStaff(o) {
   const nvId = String(o['ID NHÂN VIÊN'] ?? '').trim() || null;
   const status = o['TÌNH TRẠNG'] ?? o['TRẠNG THÁI'] ?? o['STATUS'] ?? '';
-  return { nv_id: nvId, name: String(o['TÊN NHÂN VIÊN'] ?? '').trim(), role: String(o['VỊ TRÍ'] ?? '').trim(), channels_count: Math.round(parseNumberVN(o['SỐ LƯỢNG KÊNH'])), report_file_id: String(o['LINK REPORT'] ?? '').trim() || null, raw_row: o.__values, active: !isInactiveStatus(status) && !INACTIVE_STAFF_IDS.has(String(nvId || '').toUpperCase()) };
+  return { nv_id: nvId, name: String(o['TÊN NHÂN VIÊN'] ?? '').trim(), role: String(o['VỊ TRÍ'] ?? '').trim(), channels_count: Math.round(parseNumberVN(o['SỐ LƯỢNG KÊNH'])), report_file_id: String(o['LINK REPORT'] ?? '').trim() || null, raw_row: o.__values, active: resolveStaffStatus(status).active };
 }
 export function mapBrand(o) {
   return { brand_code: String(o['ID BRAND'] ?? '').trim() || null, name: String(o['TÊN THƯƠNG HIỆU'] ?? '').trim(), client_code: String(o['MÃ KH'] ?? '').trim() || null, client_name: String(o['KHÁCH HÀNG'] ?? '').trim(), group_name: String(o['NHÓM KHÁCH HÀNG'] ?? '').trim(), status: String(o['TRẠNG THÁI'] ?? '').trim(), raw_row: o.__values, active: true };

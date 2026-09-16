@@ -20,7 +20,7 @@ No command in this folder writes to Google Drive/Sheets unless explicitly implem
 
 ## Master CONFIG push
 
-`npm run config-push:dry-run` audits the Master `CONFIG` snapshot against every active employee source. Blank registry status is active; explicit inactive/disabled/retired/archived/offboarded status is skipped. Dry-run uses Sheets read-only and Drive metadata read-only scopes and performs no database or Google writes.
+`npm run config-push:dry-run` audits the Master `CONFIG` snapshot against every active employee source. Source seeding reads Master `2. NHAN SU` through the read-only Google API: `TÌNH TRẠNG` is authoritative, `Đang làm` and blank are active, and `Đã nghỉ`/`inactive`/`disabled`/`retired`/`archived`/`offboarded` are inactive. Employee files absent from Master are logged and skipped. Discovery performs no Google writes; config-push dry-run performs no Google writes.
 
 Production is deliberately gated: run `npm run migrate:config-push` once, then `npm run config-push:production` with `NODE_ENV=production`, `CONFIG_PUSH_PRODUCTION=1`, and exactly 2–3 approved IDs in `CONFIG_PUSH_PILOT_NV_IDS`. A later full run additionally requires `CONFIG_PUSH_FULL_ROLLOUT=1`. It uses at most two workers and 55 requests/minute, isolates file failures, and resumes from database checkpoints. The only permitted target ranges are `'CONFIG'!A1:H20` and the version/hash marker `'CONFIG'!X1:Y2`; the worker never creates, clears, resizes, or writes any other sheet.
 

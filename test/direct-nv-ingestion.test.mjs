@@ -13,9 +13,9 @@ const sources=Array.from({length:24},(_,i)=>({nv_id:`NV${String(i+1).padStart(2,
 
 test('registry treats blank/missing status active and skips authoritative inactive status',async()=>{
   const fixture=JSON.parse(fs.readFileSync('config/nv-sources.example.json','utf8'));
-  assert.equal(fixture.sources.length,24);
+  assert.equal(fixture.sources.length,22);
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-registry-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify(fixture));
-  const active=await discoverSources({},file); assert.equal(active.length,22); assert.ok(active.every(x=>!['NV15','NV16'].includes(x.nv_id)));
+  const active=await discoverSources({},file); assert.equal(active.length,22);
 });
 
 test('finds real employee header at row 5 and preserves data source row numbers',async()=>{

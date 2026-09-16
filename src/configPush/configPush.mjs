@@ -1,17 +1,14 @@
 import crypto from 'node:crypto';
 import { GoogleApi } from '../google/googleApi.mjs';
+import { isRegisteredSourceActive } from '../staffStatus.mjs';
 
 export const CONFIG_RANGE = "'CONFIG'!A1:H20";
 export const MARKER_RANGE = "'CONFIG'!X1:Y2";
 export const WRITE_ALLOWLIST = Object.freeze([CONFIG_RANGE, MARKER_RANGE]);
-const INACTIVE = new Set(['inactive', 'disabled', 'retired', 'archived', 'offboarded']);
 const clean = value => String(value ?? '').trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export function isPushSourceActive(source) {
-  const status = clean(source?.status).toLocaleLowerCase('und');
-  return status ? !INACTIVE.has(status) : source?.active !== false;
-}
+export const isPushSourceActive = isRegisteredSourceActive;
 
 export function canonicalGrid(values, rows = 20, columns = 8) {
   return Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, column) => values?.[row]?.[column] ?? ''));

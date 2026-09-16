@@ -4,7 +4,7 @@ import { CONFIG_RANGE, createConfigPushApi, isPushSourceActive, runConfigPush, s
 const json = value => JSON.stringify(value);
 
 async function registry(db) {
-  return (await db.query(`select nv_id,google_file_id,sheet_name,status,active from nv_ingestion_sources order by nv_id`)).rows;
+  return (await db.query(`select nv_id,google_file_id,sheet_name,status,active,master_registry_present from nv_ingestion_sources order by nv_id`)).rows;
 }
 
 async function masterSnapshot(api) {

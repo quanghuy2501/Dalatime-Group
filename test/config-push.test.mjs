@@ -21,6 +21,8 @@ test('hash marker skips an already applied snapshot',async()=>{
   assert.equal(result.status,'hash_skip'); assert.equal(api.writes.length,0);
 });
 test('blank status is active',()=>assert.equal(isPushSourceActive(source('01','')),true));
+test('blank Master status overrides legacy active=false',()=>assert.equal(isPushSourceActive({...source('01',''),active:false}),true));
+test('source absent from Master registry is skipped',()=>assert.equal(isPushSourceActive({...source('01','Đang làm'),master_registry_present:false}),false));
 test('inactive status is skipped',async()=>{
   const api=apiFor(); const result=await runConfigPush({api,sources:[source('01','inactive')],snapshot:master,production:true});
   assert.equal(result.active,0); assert.equal(api.writes.length,0);
