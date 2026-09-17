@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createApp } from '../src/server.mjs';
-import { ACTIONS, createActionRunner, createJobWorker, enqueueJob, isAllowedAction, isAllowedWebhookAction, WEBHOOK_ACTIONS } from '../src/adminSync/control.mjs';
+import { ACTIONS, createActionRunner, createJobWorker, enqueueJob, isAllowedAction, isAllowedWebhookAction, productionConfigPushGate, WEBHOOK_ACTIONS } from '../src/adminSync/control.mjs';
 import { signWebhook, verifyWebhook, verifyWebhookDetailed } from '../src/adminSync/signature.mjs';
 
 test('HMAC signs exact body and rejects tampering, wrong secret, and stale timestamps', () => {
@@ -39,6 +39,16 @@ test('action allowlist contains only the four documented actions', () => {
   assert.equal(isAllowedAction('status'), false);
   assert.equal(isAllowedAction('shell'), false);
   assert.equal(isAllowedWebhookAction('shell'), false);
+});
+
+test('production config push gate is explicit and enqueue blocks without inserting a failed job', async () => {
+  assert.equal(productionConfigPushGate({ NODE_ENV: 'production', CONFIG_PUSH_PRODUCTION: '1' }).allowed, true);
+  const gate = productionConfigPushGate({ NODE_ENV: 'development' });
+  assert.equal(gate.allowed, false); assert.match(gate.message, /CONFIG_PUSH_PRODUCTION=1/);
+  let inserted = false;
+  const db = { query: async sql => { if (sql.includes('insert into admin_sync_jobs')) inserted = true; return { rows: [] }; } };
+  await assert.rejects(() => enqueueJob(db, { action: 'config_push', idempotencyKey: 'blocked-key', requestedBy: 'test' }), error => error.code === 'CONFIG_PUSH_PRODUCTION_NOT_CONFIGURED' && error.statusCode === 409);
+  assert.equal(inserted, false);
 });
 
 test('enqueue uses transaction lock and returns existing idempotent job', async () => {

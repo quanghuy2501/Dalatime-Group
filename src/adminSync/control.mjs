@@ -9,8 +9,26 @@ export const isAllowedAction = action => ACTIONS.includes(action);
 export const isAllowedWebhookAction = action => WEBHOOK_ACTIONS.includes(action);
 const clean = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 2000);
 
+export function productionConfigPushGate(env = process.env) {
+  const missing = [];
+  if (env.CONFIG_PUSH_PRODUCTION !== '1') missing.push('CONFIG_PUSH_PRODUCTION=1');
+  if (env.NODE_ENV !== 'production') missing.push('NODE_ENV=production');
+  if (missing.length) return { allowed: false, code: 'CONFIG_PUSH_PRODUCTION_NOT_CONFIGURED', message: `Production config push is blocked until ${missing.join(' and ')} are configured`, missing };
+  return { allowed: true, code: null, message: null, missing: [] };
+}
+
+function assertProductionConfigPushConfigured(action) {
+  if (action !== 'config_push' && action !== 'full_pipeline') return;
+  const gate = productionConfigPushGate();
+  if (!gate.allowed) {
+    const error = new Error(gate.message); error.statusCode = 409; error.code = gate.code; error.details = { action, missing: gate.missing };
+    throw error;
+  }
+}
+
 export async function enqueueJob(db, { action, idempotencyKey, requestedBy }) {
   if (!isAllowedAction(action)) { const error = new Error('Action is not allowlisted'); error.statusCode = 400; throw error; }
+  assertProductionConfigPushConfigured(action);
   if (!/^[A-Za-z0-9._:-]{8,128}$/.test(String(idempotencyKey || ''))) { const error = new Error('Idempotency key must be 8-128 safe characters'); error.statusCode = 400; throw error; }
   await db.query('begin');
   try {
@@ -98,8 +116,9 @@ export function createJobWorker({ dbConnector, actionRunner = createActionRunner
           const result = await actionRunner(job.action, { db, log });
           await db.query(`update admin_sync_jobs set status='succeeded',result=$2,finished_at=now(),updated_at=now() where id=$1`, [job.id, JSON.stringify(result ?? {})]);
         } catch (error) {
-          await log('error', error.message);
-          await db.query(`update admin_sync_jobs set status='failed',error=$2,finished_at=now(),updated_at=now() where id=$1`, [job.id, clean(error.message)]);
+          const blocked = error.code === 'CONFIG_PUSH_PRODUCTION_NOT_CONFIGURED';
+          await log(blocked ? 'warn' : 'error', blocked ? `Blocked: ${error.message}` : error.message, error.details || null);
+          await db.query(`update admin_sync_jobs set status=$2,error=$3,finished_at=now(),updated_at=now() where id=$1`, [job.id, blocked ? 'blocked' : 'failed', clean(error.message)]);
         }
       }
     } catch (error) { logger.error?.(`[admin-sync] worker failed: ${clean(error.message)}`); }
@@ -124,6 +143,7 @@ export async function webhookStatus(db) {
     count(*) filter (where status='running')::int as running,
     count(*) filter (where status='succeeded')::int as succeeded,
     count(*) filter (where status='failed')::int as failed,
+    count(*) filter (where status='blocked')::int as blocked,
     max(created_at) as latest_job_at,
     max(finished_at) filter (where status='succeeded') as latest_success_at
     from admin_sync_jobs`);
@@ -137,6 +157,7 @@ export async function webhookStatus(db) {
       total: Number(counts.total || 0),
       succeeded: Number(counts.succeeded || 0),
       failed: Number(counts.failed || 0),
+      blocked: Number(counts.blocked || 0),
       latestJobAt: counts.latest_job_at || null,
       latestSuccessAt: counts.latest_success_at || null
     }

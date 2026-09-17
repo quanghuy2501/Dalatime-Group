@@ -395,7 +395,7 @@ const SYNC_ACTIONS = [
 ];
 let syncPoll = null;
 const syncTime = value => value ? new Date(value).toLocaleString('vi-VN') : '—';
-const syncPill = status => `<span class="pill ${status === 'failed' ? 'bad' : status === 'running' || status === 'queued' ? 'warn' : ''}">${esc(status || '—')}</span>`;
+const syncPill = status => `<span class="pill ${status === 'failed' ? 'bad' : status === 'blocked' || status === 'running' || status === 'queued' ? 'warn' : ''}">${esc(status || '—')}</span>`;
 
 async function syncView() {
   let x;
