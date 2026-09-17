@@ -1,30 +1,20 @@
 /** Minimal signed control bridge. It contains no CONFIG copy or business logic. */
 const RENDER_ACTIONS = Object.freeze({
-  'Đẩy CONFIG tới NV': 'config_push',
-  'Đồng bộ NV vào DB': 'direct_nv_sync',
-  'Làm mới / đối soát report': 'report_refresh_reconcile',
-  'Chạy toàn bộ pipeline': 'full_pipeline'
+  'Đẩy CONFIG tới NV': 'config_push'
 });
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Đồng bộ')
     .addItem('Đẩy CONFIG tới NV', 'syncConfigToNv')
-    .addItem('Đồng bộ NV vào DB', 'syncNvToDb')
-    .addItem('Làm mới / đối soát report', 'syncReports')
-    .addSeparator()
-    .addItem('Chạy toàn bộ pipeline', 'syncFullPipeline')
     .addSeparator()
     .addItem('Kiểm tra trạng thái', 'checkRenderStatus')
     .addToUi();
 }
 
 function syncConfigToNv() { return enqueueRenderSync_('config_push'); }
-function syncNvToDb() { return enqueueRenderSync_('direct_nv_sync'); }
-function syncReports() { return enqueueRenderSync_('report_refresh_reconcile'); }
-function syncFullPipeline() { return enqueueRenderSync_('full_pipeline'); }
 
 // Assign this function to a Sheet drawing/button if one-click access is desired.
-function syncButton() { return syncFullPipeline(); }
+function syncButton() { return syncConfigToNv(); }
 
 function checkRenderStatus() {
   const response = callRenderWebhook_('status', null);

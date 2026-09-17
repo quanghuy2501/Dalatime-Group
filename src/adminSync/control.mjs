@@ -4,7 +4,7 @@ import { runDirectNvIngestion } from '../ingestion/directNvRunner.mjs';
 
 export const ACTIONS = Object.freeze(['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
 export const WEBHOOK_STATUS_ACTION = 'status';
-export const WEBHOOK_ACTIONS = Object.freeze([...ACTIONS, WEBHOOK_STATUS_ACTION]);
+export const WEBHOOK_ACTIONS = Object.freeze(['config_push', WEBHOOK_STATUS_ACTION]);
 export const isAllowedAction = action => ACTIONS.includes(action);
 export const isAllowedWebhookAction = action => WEBHOOK_ACTIONS.includes(action);
 const clean = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 2000);
