@@ -50,8 +50,8 @@ def verify(blueprint: dict) -> None:
         raise ValueError("persistent worker requires durable state disk")
     if not nv_ingestion or nv_ingestion.get("type") != "cron":
         raise ValueError("direct NV ingestion cron is required")
-    if str(nv_ingestion.get("startCommand", "")) != "npm run migrate:nv && npm run seed:nv-sources && npm run sync:nv":
-        raise ValueError("direct NV cron must run the transactional NV migration before sync:nv")
+    if str(nv_ingestion.get("startCommand", "")) != "npm run seed:nv-sources && npm run sync:nv":
+        raise ValueError("direct NV cron must seed sources and run sync:nv without deploy-time migrations")
     nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
     for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "MASTER_SPREADSHEET_ID"):
         if key not in nv_env:

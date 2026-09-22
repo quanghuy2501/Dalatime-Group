@@ -43,7 +43,10 @@ services:
     region: singapore
     schedule: "*/30 * * * *"
     buildCommand: npm ci
-    startCommand: npm run migrate:nv && npm run seed:nv-sources && npm run sync:nv
+    # Schema migrations are deploy-time operations. Do not run CREATE/ALTER inside
+    # the recurring cron: the production pooler may expose a read-only transaction
+    # and one migration failure would prevent every sync from starting.
+    startCommand: npm run seed:nv-sources && npm run sync:nv
     envVars:
       - key: NODE_ENV
         value: production
