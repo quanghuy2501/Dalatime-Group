@@ -4,5 +4,11 @@
       "tokenHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "clientCode": "CUSTOMER_CODE_FROM_CLIENTS_TABLE"
     }
+  ],
+  "brands": [
+    {
+      "tokenHash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "brandCode": "BRAND_CODE_FROM_BRANDS_TABLE"
+    }
   ]
 }

@@ -6,7 +6,7 @@ const output = process.argv[3] || 'config/report-customers.local.json';
 if (!clientCode) throw new Error('Usage: node scripts/generate-report-token.mjs CLIENT_CODE [output.json]');
 const token = crypto.randomBytes(32).toString('base64url');
 const tokenHash = crypto.createHash('sha256').update(token, 'utf8').digest('hex');
-let config = { customers: [] };
+let config = { customers: [], brands: [] };
 if (fs.existsSync(output)) config = JSON.parse(fs.readFileSync(output, 'utf8'));
 config.customers = (config.customers || []).filter(x => x.clientCode !== clientCode);
 config.customers.push({ clientCode, tokenHash });

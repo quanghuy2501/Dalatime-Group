@@ -13,7 +13,7 @@ const dateFlag = s => isFuture(s) ? ' <span class="pill warn" title="Ngày đăn
 // Render may cold-start the service and establish a DB connection on the first request.
 // Keep the real error visible while allowing that bounded startup window.
 const REQUEST_TIMEOUT = 30000;
-const TAB_LABELS = { overview: '🏠 Tổng quan', sync: '🔄 Đồng bộ', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng' };
+const TAB_LABELS = { overview: '🏠 Tổng quan', sync: '🔄 Đồng bộ', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng', brandReports: '🔗 Report theo Brand' };
 const RANGE_PRESETS = [['7d', '7 ngày'], ['14d', '14 ngày'], ['30d', '30 ngày'], ['90d', '90 ngày'], ['all', 'Tất cả']];
 
 let tab = (location.hash || '').replace('#', '');
@@ -387,6 +387,16 @@ async function links() {
   ])}</div>`;
 }
 
+async function brandReports() {
+  const x = await api('/api/admin/report-links');
+  return `<div class="panel"><h2>🔗 Report theo Brand</h2><p class="muted">Mỗi link chỉ cấp quyền xem đúng một brand. Brand trùng tên sau chuẩn hóa được khóa an toàn vì dữ liệu bài hiện chỉ lưu tên brand.</p>${table(x.brands || [], [
+    ['brand_code', 'Mã brand'], ['name', 'Brand'], ['client_name', 'Khách hàng'],
+    [r => `<span class="pill ${r.active ? '' : 'neutral'}">${r.active ? 'Active' : 'Inactive'}</span>`, 'Trạng thái'],
+    [r => r.ambiguous ? '<span class="pill bad">Trùng tên — đã khóa</span>' : `<span class="pill ${r.reportPath ? '' : 'neutral'}">${r.reportPath ? 'Đã cấu hình' : 'Chưa có'}</span>`, 'Link riêng'],
+    [r => r.reportPath ? `<a class="button small" href="${esc(r.reportPath)}" target="_blank" rel="noopener">Mở report</a>` : '<span class="muted">—</span>', 'Báo cáo']
+  ])}</div>`;
+}
+
 const SYNC_ACTIONS = [
   ['config_push', 'Đẩy CONFIG tới NV', 'Chỉ ghi bốn vùng CONFIG được allowlist; các cờ production vẫn bắt buộc.'],
   ['direct_nv_sync', 'Đồng bộ NV → DB', 'Đọc trực tiếp file NV và xuất bản snapshot DB theo transaction.'],
@@ -442,6 +452,7 @@ async function render() {
     else if (tab === 'posts') html = await postsView();
     else if (tab === 'health') html = health();
     else if (tab === 'links') html = await links();
+    else if (tab === 'brandReports') html = await brandReports();
   } catch (e) {
     html = errorPanel('Không tải được mục này: ' + e.message);
   }

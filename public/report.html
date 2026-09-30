@@ -285,7 +285,8 @@
           .join("");
       }
       function filters() {
-        return `<section class="panel filters"><label>TỪ NGÀY<input id="from" type="date" value="${state.from}"></label><label>ĐẾN NGÀY<input id="to" type="date" value="${state.to}"></label><label>THƯƠNG HIỆU<select id="brand"><option value="">Tất cả</option>${opts(status.brands, state.brand)}</select></label><label>KÊNH<select id="channel"><option value="">Tất cả</option>${opts(status.channels, state.channel)}</select></label><button onclick="apply()">Áp dụng</button></section>`;
+        const brandFilter = status.reportType === "brand" ? "" : `<label>THƯƠNG HIỆU<select id="brand"><option value="">Tất cả</option>${opts(status.brands, state.brand)}</select></label>`;
+        return `<section class="panel filters"><label>TỪ NGÀY<input id="from" type="date" value="${state.from}"></label><label>ĐẾN NGÀY<input id="to" type="date" value="${state.to}"></label>${brandFilter}<label>KÊNH<select id="channel"><option value="">Tất cả</option>${opts(status.channels, state.channel)}</select></label><button onclick="apply()">Áp dụng</button></section>`;
       }
       function metric(a, b) {
         return `<div class="kpi"><b>${a}</b><strong>${b}</strong></div>`;
@@ -300,7 +301,7 @@
       async function apply() {
         state.from = from.value;
         state.to = to.value;
-        state.brand = brand.value;
+        state.brand = document.getElementById("brand")?.value || "";
         state.channel = channel.value;
         page = 0;
         load();
@@ -313,7 +314,7 @@
             api("posts", { limit, offset: page * limit }),
           ]);
           document.getElementById("app").innerHTML =
-            `<header><div><div class="muted">DALAT TIME · BÁO CÁO KHÁCH HÀNG</div><h1>${esc(status.customerName)}</h1><div class="muted">Báo cáo số liệu theo dữ liệu đã đồng bộ</div></div><div class="sync muted">CẬP NHẬT LẦN CUỐI<br><b>${status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString("vi-VN") : "Chưa có"}</b></div></header>${filters()}<section class="kpis">${metric("Tổng bài đã đăng", n(o.posts))}${metric("🔥 Số bài viral", n(o.viral))}${metric("🏆 Số bài độc quyền", n(o.exclusive))}${metric("Tổng số view", n(o.view))}${metric("Tổng số like", n(o.likes))}${metric("Tổng số comment", n(o.comments))}${metric("Tổng số save", n(o.saves))}${metric("Tổng số share", n(o.shares))}${metric("Tỷ lệ tương tác", p(o.er))}</section><div class="grid"><section class="panel"><h2>Xu hướng lượt xem theo ngày đăng</h2>${t.length ? chart(t) : '<div class="empty">Chưa có dữ liệu trong khoảng này</div>'}</section></div>${table(d)}`;
+            `<header><div><div class="muted">DALAT TIME · ${status.reportType === "brand" ? "BÁO CÁO THEO BRAND" : "BÁO CÁO KHÁCH HÀNG"}</div><h1>${esc(status.customerName)}</h1><div class="muted">Báo cáo số liệu theo dữ liệu đã đồng bộ</div></div><div class="sync muted">CẬP NHẬT LẦN CUỐI<br><b>${status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString("vi-VN") : "Chưa có"}</b></div></header>${filters()}<section class="kpis">${metric("Tổng bài đã đăng", n(o.posts))}${metric("🔥 Số bài viral", n(o.viral))}${metric("🏆 Số bài độc quyền", n(o.exclusive))}${metric("Tổng số view", n(o.view))}${metric("Tổng số like", n(o.likes))}${metric("Tổng số comment", n(o.comments))}${metric("Tổng số save", n(o.saves))}${metric("Tổng số share", n(o.shares))}${metric("Tỷ lệ tương tác", p(o.er))}</section><div class="grid"><section class="panel"><h2>Xu hướng lượt xem theo ngày đăng</h2>${t.length ? chart(t) : '<div class="empty">Chưa có dữ liệu trong khoảng này</div>'}</section></div>${table(d)}`;
         } catch (e) {
           document.getElementById("app").innerHTML =
             `<div class="empty">${esc(e.message)}</div>`;

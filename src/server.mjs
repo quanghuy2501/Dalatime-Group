@@ -19,8 +19,11 @@ function loadReportLinks() {
   try {
     const raw = fs.readFileSync(path.resolve(process.cwd(), reportLinksPath), 'utf8');
     const parsed = JSON.parse(raw);
-    return new Map((parsed.customers || parsed.oneTime || []).map(item => [item.clientCode, item.reportPath]));
-  } catch { return new Map(); }
+    return {
+      customers: new Map((parsed.customers || parsed.oneTime || []).map(item => [item.clientCode, item.reportPath])),
+      brands: new Map((parsed.brands || []).map(item => [item.brandCode, item.reportPath]))
+    };
+  } catch { return { customers: new Map(), brands: new Map() }; }
 }
 
 function asyncRoute(fn) {
@@ -116,9 +119,20 @@ app.get('/api/alerts', asyncRoute(async (req, res) => res.json(await appWithDb(g
 app.get('/api/heatmap', asyncRoute(async (req, res) => res.json(await appWithDb(db => getHeatmap(db, req.query)))));
 app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   const clients = await appWithDb(async db => (await db.query('select client_code,name,active from clients order by active desc,name')).rows);
-  const configured = new Set(reportCustomers.map(item => item.clientCode));
+  const brands = await appWithDb(async db => (await db.query(`select b.brand_code,b.name,b.client_code,b.client_name,b.active,
+    count(*) over (partition by lower(regexp_replace(trim(b.name), '\\s+', ' ', 'g')))::int as canonical_count
+    from brands b where b.brand_code is not null order by b.active desc,b.name,b.brand_code`)).rows);
+  const configuredCustomers = new Set(reportCustomers.filter(item => item.scope !== 'brand').map(item => item.clientCode));
+  const configuredBrands = new Set(reportCustomers.filter(item => item.scope === 'brand').map(item => item.brandCode));
   const reportLinks = loadReportLinks();
-  res.json({ clients: clients.map(item => ({ ...item, configured: configured.has(item.client_code), reportPath: reportLinks.get(item.client_code) || null })), operation: 'npm run portal:token -- <CLIENT_CODE>' });
+  res.json({
+    clients: clients.map(item => ({ ...item, configured: configuredCustomers.has(item.client_code), reportPath: reportLinks.customers.get(item.client_code) || null })),
+    brands: brands.map(item => {
+      const ambiguous = item.canonical_count !== 1;
+      return { ...item, ambiguous, configured: !ambiguous && configuredBrands.has(item.brand_code), reportPath: !ambiguous ? reportLinks.brands.get(item.brand_code) || null : null };
+    }),
+    operations: { customer: 'npm run portal:token -- <CLIENT_CODE>', brand: 'npm run portal:brand-token -- <BRAND_CODE>' }
+  });
 }));
 app.get('/api/admin/sync/status', asyncRoute(async (req, res) => {
   try {

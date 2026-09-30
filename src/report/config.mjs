@@ -10,18 +10,25 @@ export function hashReportToken(token) {
 function parseConfig(raw, source) {
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error(`Invalid JSON in ${source}`); }
-  const entries = Array.isArray(parsed) ? parsed : parsed.customers;
-  if (!Array.isArray(entries)) throw new Error(`${source} must contain a customers array`);
+  const legacyEntries = Array.isArray(parsed) ? parsed : parsed.customers;
+  if (!Array.isArray(legacyEntries)) throw new Error(`${source} must contain a customers array`);
+  const brandEntries = Array.isArray(parsed?.brands) ? parsed.brands : [];
+  const entries = [
+    ...legacyEntries.map(entry => ({ ...entry, scope: entry?.scope || 'customer' })),
+    ...brandEntries.map(entry => ({ ...entry, scope: 'brand' }))
+  ];
   const seen = new Set();
   return entries.map((entry, index) => {
     const tokenHash = String(entry?.tokenHash || '').toLowerCase();
+    const scope = entry?.scope;
     const clientCode = String(entry?.clientCode || '').trim();
-    if (!/^[a-f0-9]{64}$/.test(tokenHash) || !clientCode) {
-      throw new Error(`Invalid report customer entry ${index + 1} in ${source}`);
+    const brandCode = String(entry?.brandCode || '').trim();
+    if (!/^[a-f0-9]{64}$/.test(tokenHash) || !['customer', 'brand'].includes(scope) || (scope === 'customer' ? !clientCode : !brandCode)) {
+      throw new Error(`Invalid report entry ${index + 1} in ${source}`);
     }
     if (seen.has(tokenHash)) throw new Error(`Duplicate report token hash in ${source}`);
     seen.add(tokenHash);
-    return Object.freeze({ tokenHash, clientCode });
+    return Object.freeze(scope === 'brand' ? { tokenHash, scope, brandCode } : { tokenHash, scope, clientCode });
   });
 }
 
@@ -47,4 +54,10 @@ export function resolveReportCustomer(token, customers) {
     if (configured.length === candidate.length && crypto.timingSafeEqual(configured, candidate)) match = customer;
   }
   return match;
+}
+
+// Kept separate from resolveReportCustomer so existing callers and customer
+// tokens retain their exact behaviour. New routes should use this scoped form.
+export function resolveReportPrincipal(token, entries) {
+  return resolveReportCustomer(token, entries);
 }
