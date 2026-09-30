@@ -1,20 +1,28 @@
 import express from 'express';
 import path from 'path';
-import { resolveReportPrincipal } from './config.mjs';
+import { resolveRegistryPrincipal } from './registry.mjs';
 import { getBrandReportOverview, getBrandReportPosts, getBrandReportScope, getBrandReportStatus, getBrandReportTimeseries, getReportOverview, getReportPosts, getReportScope, getReportStatus, getReportTimeseries } from './queries.mjs';
 
 function validDate(value) { return !value || /^\d{4}-\d{2}-\d{2}$/.test(value); }
 
 export function createReportRouter({ customers, withDb, publicDir }) {
   const router = express.Router({ mergeParams: true });
-  router.use('/:token', (req, res, next) => {
-    const principal = resolveReportPrincipal(req.params.token, customers);
-    if (!principal) return res.status(404).send('Not found');
-    req.reportPrincipal = principal;
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-    next();
+  router.use('/:token', async (req, res, next) => {
+    try {
+      const resolved = await withDb(async db => {
+        const principal = await resolveRegistryPrincipal(db, req.params.token, customers);
+        if (!principal) return null;
+        const scope = principal.scope === 'brand' ? await getBrandReportScope(db, principal.brandCode) : await getReportScope(db, principal.clientCode);
+        return scope ? { principal, scope } : null;
+      });
+      if (!resolved) return res.status(404).send('Not found');
+      const { principal } = resolved;
+      req.reportPrincipal = principal;
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      next();
+    } catch (error) { next(error); }
   });
   router.get('/:token', (req, res) => res.sendFile(path.join(publicDir, 'report.html')));
   return router;
@@ -24,7 +32,7 @@ export function createReportApiRouter({ customers, withDb }) {
   const router = express.Router({ mergeParams: true });
   router.use('/:token', async (req, res, next) => {
     try {
-      const principal = resolveReportPrincipal(req.params.token, customers);
+      const principal = await withDb(db => resolveRegistryPrincipal(db, req.params.token, customers));
       if (!principal) return res.status(404).json({ ok: false, error: 'Not found' });
       if (!validDate(req.query.from) || !validDate(req.query.to) || (req.query.from && req.query.to && req.query.from > req.query.to)) {
         return res.status(400).json({ ok: false, error: 'Invalid date range' });

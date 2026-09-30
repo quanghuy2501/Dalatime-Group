@@ -382,7 +382,7 @@ async function links() {
   return `<div class="panel"><h2>🏢 Khách hàng</h2><p class="muted">Bấm <b>Mở report</b> để xem báo cáo riêng của từng khách hàng.</p>${table(x.clients, [
     ['client_code', 'Mã KH'], ['name', 'Khách hàng'],
     [r => `<span class="pill ${r.active ? '' : 'neutral'}">${r.active ? 'Active' : 'Inactive'}</span>`, 'Trạng thái'],
-    [r => `<span class="pill ${r.reportPath ? '' : 'neutral'}">${r.reportPath ? 'Đã cấu hình' : 'Chưa có'}</span>`, 'Key báo cáo'],
+    [r => `<span class="pill ${r.reportPath ? '' : 'neutral'}">${esc({ready:'Sẵn sàng',missing:'Chưa có','hash-only':'Đã import — cần rotate',revoked:'Đã thu hồi',inactive:'Inactive'}[r.linkState] || r.linkState)}</span>`, 'Link báo cáo'],
     [r => r.reportPath ? `<a class="button small" href="${esc(r.reportPath)}" target="_blank" rel="noopener">Mở report</a>` : '<span class="muted">—</span>', 'Báo cáo']
   ])}</div>`;
 }
@@ -392,7 +392,7 @@ async function brandReports() {
   return `<div class="panel"><h2>🔗 Report theo Brand</h2><p class="muted">Mỗi link chỉ cấp quyền xem đúng một brand. Brand trùng tên sau chuẩn hóa được khóa an toàn vì dữ liệu bài hiện chỉ lưu tên brand.</p>${table(x.brands || [], [
     ['brand_code', 'Mã brand'], ['name', 'Brand'], ['client_name', 'Khách hàng'],
     [r => `<span class="pill ${r.active ? '' : 'neutral'}">${r.active ? 'Active' : 'Inactive'}</span>`, 'Trạng thái'],
-    [r => r.ambiguous ? '<span class="pill bad">Trùng tên — đã khóa</span>' : `<span class="pill ${r.reportPath ? '' : 'neutral'}">${r.reportPath ? 'Đã cấu hình' : 'Chưa có'}</span>`, 'Link riêng'],
+    [r => r.ambiguous ? '<span class="pill bad">Trùng tên — đã khóa</span>' : `<span class="pill ${r.reportPath ? '' : 'neutral'}">${esc({ready:'Sẵn sàng',missing:'Chưa có','hash-only':'Đã import — cần rotate',revoked:'Đã thu hồi',inactive:'Inactive'}[r.linkState] || r.linkState)}</span>`, 'Link riêng'],
     [r => r.reportPath ? `<a class="button small" href="${esc(r.reportPath)}" target="_blank" rel="noopener">Mở report</a>` : '<span class="muted">—</span>', 'Báo cáo']
   ])}</div>`;
 }

@@ -1,31 +1,19 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { connectDb } from './db/postgres.mjs';
 import { authMiddleware, credentialsMatch, createSessionCookie, clearSessionCookie } from './auth.mjs';
 import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHealth, getTimeseries, getIssues, getIssueTypes, getMasters, getAlerts, getHeatmap } from './db/queries.mjs';
 import { loadReportCustomers } from './report/config.mjs';
 import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
+import { decryptReportToken, registryKey } from './report/registry.mjs';
 import { createJobWorker, enqueueJob, isAllowedWebhookAction, retryJob, syncStatus, WEBHOOK_STATUS_ACTION, webhookStatus } from './adminSync/control.mjs';
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
 const publicDir = path.join(__dirname, '..', 'public');
-const reportLinksPath = process.env.REPORT_PORTAL_LINKS_FILE || 'config/report-links.local.json';
-function loadReportLinks() {
-  try {
-    const raw = fs.readFileSync(path.resolve(process.cwd(), reportLinksPath), 'utf8');
-    const parsed = JSON.parse(raw);
-    return {
-      customers: new Map((parsed.customers || parsed.oneTime || []).map(item => [item.clientCode, item.reportPath])),
-      brands: new Map((parsed.brands || []).map(item => [item.brandCode, item.reportPath]))
-    };
-  } catch { return { customers: new Map(), brands: new Map() }; }
-}
-
 function asyncRoute(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
@@ -118,20 +106,30 @@ app.get('/api/masters', asyncRoute(async (req, res) => res.json(await appWithDb(
 app.get('/api/alerts', asyncRoute(async (req, res) => res.json(await appWithDb(getAlerts))));
 app.get('/api/heatmap', asyncRoute(async (req, res) => res.json(await appWithDb(db => getHeatmap(db, req.query)))));
 app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
-  const clients = await appWithDb(async db => (await db.query('select client_code,name,active from clients order by active desc,name')).rows);
-  const brands = await appWithDb(async db => (await db.query(`select b.brand_code,b.name,b.client_code,b.client_name,b.active,
-    count(*) over (partition by lower(regexp_replace(trim(b.name), '\\s+', ' ', 'g')))::int as canonical_count
-    from brands b where b.brand_code is not null order by b.active desc,b.name,b.brand_code`)).rows);
+  const key = registryKey();
+  const { clients, brands } = await appWithDb(async db => ({
+    clients: (await db.query(`select c.client_code,c.name,c.active,r.status,r.token_ciphertext,r.token_iv,r.token_tag,r.created_at,r.rotated_at
+      from clients c left join report_link_registry r on r.scope='customer' and r.object_code=c.client_code
+      order by c.active desc,c.name,c.client_code`)).rows,
+    brands: (await db.query(`select b.brand_code,b.name,b.client_code,b.client_name,b.active,
+      count(*) filter (where b.active) over (partition by lower(regexp_replace(trim(b.name), '\\s+', ' ', 'g')))::int as canonical_count,
+      r.status,r.token_ciphertext,r.token_iv,r.token_tag,r.created_at,r.rotated_at
+      from brands b left join report_link_registry r on r.scope='brand' and r.object_code=b.brand_code
+      where b.brand_code is not null order by b.active desc,b.name,b.brand_code`)).rows
+  }));
   const configuredCustomers = new Set(reportCustomers.filter(item => item.scope !== 'brand').map(item => item.clientCode));
   const configuredBrands = new Set(reportCustomers.filter(item => item.scope === 'brand').map(item => item.brandCode));
-  const reportLinks = loadReportLinks();
+  const reportPath = row => {
+    if (!row.active || row.status !== 'active') return null;
+    try { const token = decryptReportToken(row, key); return token ? `/report/${token}` : null; } catch { return null; }
+  };
   res.json({
-    clients: clients.map(item => ({ ...item, configured: configuredCustomers.has(item.client_code), reportPath: reportLinks.customers.get(item.client_code) || null })),
+    clients: clients.map(item => ({ ...item, configured: item.status === 'active' || configuredCustomers.has(item.client_code), reportPath: reportPath(item), linkState: !item.active ? 'inactive' : item.status === 'revoked' ? 'revoked' : item.status === 'active' ? (reportPath(item) ? 'ready' : 'hash-only') : 'missing', token_ciphertext: undefined, token_iv: undefined, token_tag: undefined })),
     brands: brands.map(item => {
       const ambiguous = item.canonical_count !== 1;
-      return { ...item, ambiguous, configured: !ambiguous && configuredBrands.has(item.brand_code), reportPath: !ambiguous ? reportLinks.brands.get(item.brand_code) || null : null };
+      return { ...item, ambiguous, configured: !ambiguous && (item.status === 'active' || configuredBrands.has(item.brand_code)), reportPath: !ambiguous ? reportPath(item) : null, linkState: !item.active ? 'inactive' : ambiguous ? 'ambiguous' : item.status === 'revoked' ? 'revoked' : item.status === 'active' ? (reportPath(item) ? 'ready' : 'hash-only') : 'missing', token_ciphertext: undefined, token_iv: undefined, token_tag: undefined };
     }),
-    operations: { customer: 'npm run portal:token -- <CLIENT_CODE>', brand: 'npm run portal:brand-token -- <BRAND_CODE>' }
+    operations: { import: 'npm run portal:import-config -- --apply <config>', ensure: 'npm run portal:ensure-active -- --apply' }
   });
 }));
 app.get('/api/admin/sync/status', asyncRoute(async (req, res) => {

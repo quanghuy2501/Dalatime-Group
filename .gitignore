@@ -2,6 +2,7 @@
 node_modules/
 reports/
 config/report-customers.local.json
+config/report-links.local.json
 .runtime/
 *.py[cod]
 __pycache__/

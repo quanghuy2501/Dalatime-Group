@@ -23,7 +23,7 @@ services:
         value: 1sIMJ0TTPEC_hu6OBuW8hSHRLbb0Ajcr8
       - key: REPORT_PORTAL_CONFIG_FILE
         sync: false
-      - key: REPORT_PORTAL_LINKS_FILE
+      - key: REPORT_REGISTRY_ENCRYPTION_KEY
         sync: false
       - key: AUTH_SESSION_SECRET
         generateValue: true
@@ -35,6 +35,25 @@ services:
         sync: false
       - key: CONFIG_PUSH_PRODUCTION
         value: "0"
+
+  # Opt-in registry maintenance. It fails closed until an operator approves it
+  # by setting REPORT_REGISTRY_PRODUCTION=1 after installing migration 013.
+  - type: cron
+    name: Dalatime-Group-report-link-registry
+    runtime: node
+    region: singapore
+    schedule: "20 2 * * *"
+    buildCommand: npm ci
+    startCommand: npm run portal:ensure-active -- --apply
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REPORT_REGISTRY_ENCRYPTION_KEY
+        sync: false
+      - key: REPORT_REGISTRY_PRODUCTION
+        sync: false
 
   # Scheduled, pay-per-run automation. No always-on worker or persistent disk.
   - type: cron

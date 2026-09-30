@@ -1,57 +1,70 @@
-# Customer Portal - private report links
+# Customer and brand report registry
 
-## Architecture
+Customer and brand reports use `report_link_registry` in Supabase. Google Sheets are not written by this feature and `work.dalattimegroup.com` is outside its scope.
 
-```text
-Employee files -> Master RAW_DATA/NORMALIZED -> Supabase exact mirror -> Customer Portal
-```
+## Security and lifecycle
 
-Customer files in Google Drive are no longer required for the new customer-facing report flow. Keep them as fallback during the transition.
+The identity is `(scope, object_code)`, where scope is `customer` or `brand`. The table has a primary key on that pair and a unique SHA-256 `token_hash`. Runtime authorization derives scope and code only from the matched registry row; URL/query parameters cannot change the object.
 
-## Create a private customer link
+Tokens have `active` or `revoked` status plus `created_at`, `rotated_at`, and `revoked_at`. Rotation replaces the hash and immediately invalidates the old token. Inactive customers, inactive brands, and active brands with duplicate canonical names are revoked by the ensure job. All missing, revoked, ambiguous, inactive, malformed, and database-error cases fail closed.
 
-Use the client code from the `clients` table / Master customer list:
+The optional token material is AES-256-GCM encrypted with `REPORT_REGISTRY_ENCRYPTION_KEY`. Plaintext is never stored in the database or application logs. The key must be 32 bytes encoded as 64 hex characters or base64. Generate it locally with `openssl rand -hex 32`, then store it as a Render secret. Do not commit or print the production value.
 
-```bash
-node scripts/generate-report-token.mjs CLIENT_CODE config/report-customers.local.json
-```
+## Install migration (manual approval only)
 
-The command writes only a SHA-256 token hash to the local config and prints the one-time private URL token. Do not commit, paste, or log the token. The local config is gitignored and should be mode 600.
-
-Configure the server with:
-
-```env
-REPORT_PORTAL_CONFIG_FILE=/absolute/path/to/config/report-customers.local.json
-```
-
-Do not set both `REPORT_PORTAL_CONFIG_FILE` and `REPORT_PORTAL_CUSTOMERS_JSON`.
-
-## Routes
-
-- `/report/<token>` - customer report page
-- `/api/report/<token>/status`
-- `/api/report/<token>/overview`
-- `/api/report/<token>/timeseries`
-- `/api/report/<token>/posts`
-
-Invalid tokens return 404. Queries are scoped by the customer code and active brand mapping in the database; browser-supplied customer IDs are not trusted.
-
-## Local run
+Migration `migrations/013_report_link_registry.sql` creates only the table and indexes. This repository task does not run it in production. After review and explicit approval:
 
 ```bash
-set -a; source .env.local; set +a
-export REPORT_PORTAL_CONFIG_FILE="$PWD/config/report-customers.local.json"
-node src/server.mjs
+npm run migrate:report-registry
 ```
 
-## Deployment later
+## Migrate the existing 145 customer links without plaintext
 
-For Cloud Run/VPS:
+The old config already contains SHA-256 hashes, which are sufficient to preserve authentication:
 
-1. Store the customer config in Secret Manager or a protected mounted file.
-2. Set `DATABASE_URL`, `DASHBOARD_AUTH_TOKEN`/Basic Auth, and `REPORT_PORTAL_CONFIG_FILE` as secrets.
-3. Put the domain/reverse proxy in front of the service with HTTPS.
-4. Keep `Cache-Control: no-store` and `noindex` for tokenized reports.
-5. Rotate a customer link by generating a new token for that client code and replacing the config entry.
+```bash
+# Inspect counts; no write
+npm run portal:import-config -- /secure/report-customers.json
 
-No Google Sheet write is involved in this portal.
+# Explicit write. Production additionally requires REPORT_REGISTRY_PRODUCTION=1.
+npm run portal:import-config -- --apply /secure/report-customers.json
+```
+
+The import is transactional and writes hashes only. Imported rows appear as `hash-only` in the admin menu: their existing distributed URLs keep working, but the URL cannot be reconstructed from a hash. Rotate only when a replacement URL can be redistributed.
+
+## Ensure links for active entities
+
+```bash
+# Dry run
+npm run portal:ensure-active
+
+# Apply after migration/key configuration
+npm run portal:ensure-active -- --apply
+
+# Optional one-time local plaintext export; file is forced to mode 0600
+npm run portal:ensure-active -- --apply --output reports/report-links-once.json
+```
+
+The ensure command creates links only for missing/revoked active customers and unambiguous active brands. It revokes links that are inactive or canonically ambiguous. `--rotate` deliberately replaces all active tokens and should only be used during a coordinated rotation.
+
+In production, writes require both `--apply` and `REPORT_REGISTRY_PRODUCTION=1`. The Render cron is therefore inert/fail-closed until an operator installs migration 013, configures the encryption key, and explicitly enables that guard. Once enabled, it runs daily; a newly active entity gets a link on the next run. Plaintext is then available from the authenticated dashboard's “Khách hàng” or “Report theo Brand” menu, where the server decrypts it for that response only. It is not written to Google Sheets or logs.
+
+## Runtime and transition fallback
+
+Routes remain `/report/<token>` and `/api/report/<token>/{status,overview,timeseries,posts}`.
+
+Runtime checks the DB registry first. `REPORT_PORTAL_CONFIG_FILE` / `REPORT_PORTAL_CUSTOMERS_JSON` remains a transition fallback only when migration 013 is absent or when that object has no registry row. Once any DB row claims `(scope, code)`, config fallback cannot revive its old/revoked token. Unexpected database failures return an error rather than silently using fallback.
+
+The admin report-links API is dashboard-authenticated. It returns no ciphertext, IV, tag, hash, or encryption key. Missing encryption keys or undecryptable legacy rows are shown as `hash-only`, never logged.
+
+## Deployment order
+
+1. Back up and review the current hash config.
+2. Apply migration 013 manually.
+3. Configure the same `REPORT_REGISTRY_ENCRYPTION_KEY` on the web and registry cron services.
+4. Dry-run and import the existing hash config.
+5. Verify several existing customer and brand URLs.
+6. Dry-run ensure, then enable `REPORT_REGISTRY_PRODUCTION=1` for the cron after approval.
+7. Retain the legacy hash config during the transition; remove it only after coverage is verified.
+
+Never commit `.env`, a plaintext token, a report URL export, or the local link store.
