@@ -71,3 +71,22 @@ export async function upsertRegistryToken(db, { scope, code, tokenHash, encrypte
       status='active',rotated_at=now(),revoked_at=null
     returning scope,object_code,status,created_at,rotated_at`, values)).rows[0];
 }
+
+export async function encryptExistingRegistryToken(db, { code, tokenHash, encrypted }) {
+  if (!code || !HASH_RE.test(tokenHash) || !encrypted) throw new Error('Invalid existing registry token input');
+  return (await db.query(`update report_link_registry set token_ciphertext=$3,token_iv=$4,token_tag=$5
+    where scope='customer' and object_code=$1 and token_hash=$2 and status='active'
+    returning object_code`, [code, tokenHash, encrypted.tokenCiphertext, encrypted.tokenIv, encrypted.tokenTag])).rows[0] || null;
+}
+
+export async function importLegacyRegistryToken(db, { code, tokenHash, encrypted }) {
+  if (!code || !HASH_RE.test(tokenHash) || !encrypted) throw new Error('Invalid legacy registry token input');
+  return (await db.query(`insert into report_link_registry
+    (scope,object_code,token_hash,token_ciphertext,token_iv,token_tag,status,created_at,rotated_at,revoked_at)
+    values ('customer',$1,$2,$3,$4,$5,'active',now(),null,null)
+    on conflict (scope,object_code) do update set
+      token_hash=excluded.token_hash,token_ciphertext=excluded.token_ciphertext,token_iv=excluded.token_iv,token_tag=excluded.token_tag,
+      status='active',rotated_at=now(),revoked_at=null
+    where report_link_registry.status<>'active'
+    returning object_code`, [code, tokenHash, encrypted.tokenCiphertext, encrypted.tokenIv, encrypted.tokenTag])).rows[0] || null;
+}

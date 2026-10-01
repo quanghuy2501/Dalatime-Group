@@ -32,6 +32,31 @@ npm run portal:import-config -- --apply /secure/report-customers.json
 
 The import is transactional and writes hashes only. Imported rows appear as `hash-only` in the admin menu: their existing distributed URLs keep working, but the URL cannot be reconstructed from a hash. Rotate only when a replacement URL can be redistributed.
 
+## One-time preservation of the old customer URLs
+
+If the original one-time export is still available, use it once to add encrypted token material to the registry without changing any distributed URL. The JSON must be shaped as `{ "customers": [{ "clientCode", "name", "reportPath", "token" }] }`. Keep it outside the repository with owner-only permissions.
+
+```bash
+# Dry run. Output contains counts, reason labels, and client codes only.
+REPORT_LEGACY_LINKS_FILE=/secure/legacy-links.json \
+  npm run portal:import-legacy-links
+
+# Explicit production write. Both controls are required.
+NODE_ENV=production REPORT_REGISTRY_PRODUCTION=1 \
+REPORT_LEGACY_LINKS_FILE=/secure/legacy-links.json \
+  npm run portal:import-legacy-links -- --apply
+```
+
+An explicit CLI path may replace `REPORT_LEGACY_LINKS_FILE`:
+
+```bash
+npm run portal:import-legacy-links -- --apply /secure/legacy-links.json
+```
+
+The command validates that each path is exactly `/report/<token>`, rejects conflicting duplicate customer codes, imports active DB customers only, and runs all writes in one transaction. `KH00083` is resolved by matching the export name to the DB name; if there is no single match it is skipped and only its code/reason is reported. An existing active row with a different hash is preserved, not rotated. A matching active hash receives only its encrypted fields. No Google Sheets operation occurs.
+
+On Render, do not add a recurring plaintext-import service. For a single manual run, temporarily change the report-link registry cron command to `npm run portal:import-legacy-links -- --apply`, add the export as a Render secret file, set `REPORT_LEGACY_LINKS_FILE` to that secret-file path, and manually trigger the job. After one successful run, restore `npm run portal:ensure-active -- --apply`, delete the secret file and `REPORT_LEGACY_LINKS_FILE`, and redeploy. Confirm the dashboard shows “Sẵn sàng” for sampled customers, then securely delete the local/Render plaintext export when retention is no longer required.
+
 ## Ensure links for active entities
 
 ```bash

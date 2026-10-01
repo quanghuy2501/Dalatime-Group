@@ -38,6 +38,10 @@ services:
 
   # Opt-in registry maintenance. It fails closed until an operator approves it
   # by setting REPORT_REGISTRY_PRODUCTION=1 after installing migration 013.
+  # For the legacy plaintext import only, temporarily replace startCommand with:
+  # npm run portal:import-legacy-links -- --apply
+  # and add REPORT_LEGACY_LINKS_FILE as a secret-file path. Run once, then restore
+  # this command and remove the secret file/path immediately. Never schedule it.
   - type: cron
     name: Dalatime-Group-report-link-registry
     runtime: node

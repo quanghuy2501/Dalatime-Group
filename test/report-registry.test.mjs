@@ -8,6 +8,7 @@ import { decryptReportToken, encryptReportToken, newRegistryToken, resolveRegist
 import { hashReportToken } from '../src/report/config.mjs';
 import { getBrandReportScope, getReportScope } from '../src/report/queries.mjs';
 import fs from 'node:fs';
+import { legacyRegistryValues, parseLegacyLinks, selectLegacyLinks } from '../src/report/legacy-links.mjs';
 
 const token = 'A'.repeat(43);
 const fallback = [{ scope: 'customer', clientCode: 'KH001', tokenHash: hashReportToken(token) }];
@@ -88,4 +89,35 @@ test('migration enforces scope/code identity, unique hashes, lifecycle and no pl
   assert.match(sql, /status in \('active','revoked'\)/);
   assert.match(sql, /created_at[\s\S]*rotated_at[\s\S]*revoked_at/);
   assert.doesNotMatch(sql, /token_plaintext|report_path/);
+});
+
+test('legacy link requires reportPath and token consistency', () => {
+  assert.throws(() => parseLegacyLinks({ customers: [{ clientCode: 'KH1', name: 'One', token, reportPath: `/report/${'B'.repeat(43)}` }] }), /inconsistent/);
+  assert.equal(parseLegacyLinks({ customers: [{ clientCode: 'KH1', name: 'One', token, reportPath: `/report/${token}` }] })[0].tokenHash, hashReportToken(token));
+});
+
+test('legacy encryption round-trips and registry values contain no plaintext', () => {
+  const key = crypto.randomBytes(32);
+  const entry = parseLegacyLinks({ customers: [{ clientCode: 'KH1', name: 'One', token, reportPath: `/report/${token}` }] })[0];
+  const values = legacyRegistryValues(entry, key);
+  assert.equal(values.tokenHash, hashReportToken(token));
+  assert.equal(decryptReportToken({ token_ciphertext: values.encrypted.tokenCiphertext, token_iv: values.encrypted.tokenIv, token_tag: values.encrypted.tokenTag }, key), token);
+  assert.ok(!JSON.stringify({ ...values, token: undefined }).includes(token));
+});
+
+test('legacy duplicate conflicts fail closed except KH00083 name match', () => {
+  const other = 'B'.repeat(43);
+  const make = (clientCode, name, value) => ({ clientCode, name, token: value, tokenHash: hashReportToken(value) });
+  assert.throws(() => selectLegacyLinks([make('KH1', 'One', token), make('KH1', 'One', other)], new Map([['KH1', { name: 'One', active: true }]])), /KH1/);
+  const resolved = selectLegacyLinks([make('KH00083', 'Wrong', token), make('KH00083', ' Right  Name ', other)], new Map([['KH00083', { name: 'right name', active: true }]]));
+  assert.equal(resolved.selected[0].tokenHash, hashReportToken(other));
+  const ambiguous = selectLegacyLinks([make('KH00083', 'Wrong A', token), make('KH00083', 'Wrong B', other)], new Map([['KH00083', { name: 'Right', active: true }]]));
+  assert.deepEqual(ambiguous.skipped, [{ code: 'KH00083', reason: 'ambiguous-duplicate' }]);
+});
+
+test('legacy selection skips inactive and missing customers', () => {
+  const entries = [{ clientCode: 'OFF', name: '', token, tokenHash: hashReportToken(token) }, { clientCode: 'GONE', name: '', token: 'B'.repeat(43), tokenHash: hashReportToken('B'.repeat(43)) }];
+  const result = selectLegacyLinks(entries, new Map([['OFF', { name: 'Off', active: false }]]));
+  assert.deepEqual(result.selected, []);
+  assert.deepEqual(result.skipped, [{ code: 'OFF', reason: 'inactive' }, { code: 'GONE', reason: 'missing' }]);
 });

@@ -129,7 +129,7 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
       const ambiguous = item.canonical_count !== 1;
       return { ...item, ambiguous, configured: !ambiguous && (item.status === 'active' || configuredBrands.has(item.brand_code)), reportPath: !ambiguous ? reportPath(item) : null, linkState: !item.active ? 'inactive' : ambiguous ? 'ambiguous' : item.status === 'revoked' ? 'revoked' : item.status === 'active' ? (reportPath(item) ? 'ready' : 'hash-only') : 'missing', token_ciphertext: undefined, token_iv: undefined, token_tag: undefined };
     }),
-    operations: { import: 'npm run portal:import-config -- --apply <config>', ensure: 'npm run portal:ensure-active -- --apply' }
+    operations: { import: 'npm run portal:import-config -- --apply <config>', importLegacy: 'npm run portal:import-legacy-links -- --apply <export>', ensure: 'npm run portal:ensure-active -- --apply' }
   });
 }));
 app.get('/api/admin/sync/status', asyncRoute(async (req, res) => {
