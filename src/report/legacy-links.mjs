@@ -11,8 +11,9 @@ function canonicalName(value) {
 function validatedEntry(raw, index) {
   const clientCode = String(raw?.clientCode || '').trim();
   const name = String(raw?.name || '').trim();
-  const token = String(raw?.token || '');
   const reportPath = String(raw?.reportPath || '');
+  const pathToken = reportPath.startsWith('/report/') ? reportPath.slice('/report/'.length) : '';
+  const token = String(raw?.token || pathToken);
   if (!clientCode) throw new Error(`Legacy entry ${index + 1} has no client code`);
   if (!TOKEN_RE.test(token) || reportPath !== `/report/${token}`) {
     throw new Error(`Legacy entry for ${clientCode} has an invalid or inconsistent token path`);
