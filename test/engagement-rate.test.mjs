@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { engagementRateFromMetrics, formatEngagementPercent, normalizeEngagementRate } from '../src/utils/normalize.mjs';
+import { engagementRateFromMetrics, formatEngagementPercent, googleSerialToDate, normalizeEngagementRate, parseDateAny } from '../src/utils/normalize.mjs';
 import { mapPostRaw } from '../src/importers/liveMaster.mjs';
 
 test('ratio and legacy percent values both present as 4.82%', () => {
@@ -28,4 +28,10 @@ test('Master mapping derives canonical ER from stored metrics, not source displa
   const base = { __row:2, __values:[], 'NGÀY ĐĂNG BÀI':'2026-09-01', 'LINK BÀI ĐĂNG':'https://example.com/p', 'TÊN KÊNH':'K', VIEW:1000, LIKE:40, COMMENT:3, SAVE:2, SHARE:3 };
   assert.equal(mapPostRaw({ ...base, '% TƯƠNG TÁC':0.0482 }).engagement_rate, 0.048);
   assert.equal(mapPostRaw({ ...base, '% TƯƠNG TÁC':4.82 }).engagement_rate, 0.048);
+});
+
+test('Google serial dates fail closed outside the supported business range', () => {
+  assert.equal(googleSerialToDate(46310), '2026-10-15');
+  assert.equal(googleSerialToDate(6686421), null);
+  assert.equal(parseDateAny(6686421), null);
 });

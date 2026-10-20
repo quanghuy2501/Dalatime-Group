@@ -35,7 +35,7 @@ app.get('/healthz', (req, res) => res.json({
   ok: true,
   service: 'onicorn-dashboard-system',
   readiness: 'process-live',
-  features: { masterCatalogSync: true }
+  features: { masterCatalogSync: true, boundedSheetDates: true }
 }));
 app.get('/readyz', asyncRoute(async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });

@@ -65,6 +65,11 @@ test('exact 22-column mapping and stable idempotency key',()=>{
   assert.equal(a.row_key,b.row_key); assert.equal(a.mapped_row.config_version,'master-v1'); assert.deepEqual(a.mapped_row.raw_values,data(1));
 });
 
+test('rejects an out-of-range Google serial date before database publication',()=>{
+  const malformed=data(1); malformed[0]=6686421;
+  assert.throws(()=>normalizeNvRow(malformed,sources[0],462,'master-v1'),/invalid required value/);
+});
+
 test('24 sources use at most three concurrent readers and rerun is idempotent',async()=>{
   let active=0,max=0;
   const api={spreadsheetMeta:async()=>{active++;max=Math.max(max,active);await new Promise(r=>setTimeout(r,2));return {sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}},

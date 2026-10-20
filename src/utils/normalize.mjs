@@ -45,7 +45,9 @@ export function googleSerialToDate(serial) {
   const n = typeof serial === 'number' ? serial : Number.parseFloat(String(serial ?? ''));
   if (!Number.isFinite(n) || n <= 0) return null;
   const epoch = Date.UTC(1899, 11, 30);
-  return new Date(epoch + Math.floor(n) * 86400000).toISOString().slice(0, 10);
+  const date = new Date(epoch + Math.floor(n) * 86400000);
+  if (!Number.isFinite(date.getTime())) return null;
+  return validYmd(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
 }
 
 export function parseDateAny(v) {
