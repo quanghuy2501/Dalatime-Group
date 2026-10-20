@@ -32,6 +32,7 @@ def verify(blueprint: dict) -> None:
     automations = [service for service in services if service.get("type") in {"worker", "cron"}]
     automation = next((service for service in automations if "report-batch" in str(service.get("name", ""))), None)
     nv_ingestion = next((service for service in automations if "direct-nv-ingestion" in str(service.get("name", ""))), None)
+    report_registry = next((service for service in automations if "report-link-registry" in str(service.get("name", ""))), None)
     config_push = next((service for service in automations if "config-push" in str(service.get("name", ""))), None)
     if not web or web.get("healthCheckPath") != "/healthz":
         raise ValueError("web service must preserve /healthz")
@@ -50,8 +51,8 @@ def verify(blueprint: dict) -> None:
         raise ValueError("persistent worker requires durable state disk")
     if not nv_ingestion or nv_ingestion.get("type") != "cron":
         raise ValueError("direct NV ingestion cron is required")
-    if str(nv_ingestion.get("startCommand", "")) != "npm run seed:nv-sources && npm run sync:nv":
-        raise ValueError("direct NV cron must seed sources and run sync:nv without deploy-time migrations")
+    if str(nv_ingestion.get("startCommand", "")) != "npm run sync:catalog && npm run seed:nv-sources && npm run sync:nv":
+        raise ValueError("direct NV cron must sync catalog, seed sources, and run sync:nv without deploy-time migrations")
     nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
     for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "MASTER_SPREADSHEET_ID"):
         if key not in nv_env:
@@ -65,6 +66,16 @@ def verify(blueprint: dict) -> None:
         raise ValueError("direct NV Google request rate exceeds per-user quota")
     if int(nv_env["NV_TOTAL_TIMEOUT_MS"].get("value", 0)) >= 30 * 60 * 1000:
         raise ValueError("direct NV total timeout must be shorter than its 30-minute schedule")
+    if not report_registry or report_registry.get("type") != "cron":
+        raise ValueError("report link registry cron is required")
+    if str(report_registry.get("schedule", "")) != "5,35 * * * *":
+        raise ValueError("report link registry must run five minutes after each catalog sync")
+    if str(report_registry.get("startCommand", "")) != "npm run portal:ensure-active -- --apply":
+        raise ValueError("report link registry must ensure active report keys")
+    registry_env = {item.get("key"): item for item in report_registry.get("envVars", [])}
+    for key in ("DATABASE_URL", "REPORT_REGISTRY_ENCRYPTION_KEY", "REPORT_REGISTRY_PRODUCTION"):
+        if key not in registry_env:
+            raise ValueError(f"report link registry env is missing {key}")
     if not config_push or config_push.get("type") != "cron":
         raise ValueError("config push cron is required")
     push_env = {item.get("key"): item for item in config_push.get("envVars", [])}

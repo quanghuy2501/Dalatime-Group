@@ -72,7 +72,7 @@ npm run portal:ensure-active -- --apply --output reports/report-links-once.json
 
 The ensure command creates links only for missing/revoked active customers and unambiguous active brands. It revokes links that are inactive or canonically ambiguous. `--rotate` deliberately replaces all active tokens and should only be used during a coordinated rotation.
 
-In production, writes require both `--apply` and `REPORT_REGISTRY_PRODUCTION=1`. The Render cron is therefore inert/fail-closed until an operator installs migration 013, configures the encryption key, and explicitly enables that guard. Once enabled, it runs daily; a newly active entity gets a link on the next run. Plaintext is then available from the authenticated dashboard's “Khách hàng” or “Report theo Brand” menu, where the server decrypts it for that response only. It is not written to Google Sheets or logs.
+In production, writes require both `--apply` and `REPORT_REGISTRY_PRODUCTION=1`. The Render cron is therefore inert/fail-closed until an operator installs migration 013, configures the encryption key, and explicitly enables that guard. Once enabled, it runs at `:05` and `:35`, five minutes after the catalog sync scheduled at `:00` and `:30`; a newly active customer or unambiguous brand gets a report link in the same sync window. Plaintext is then available from the authenticated dashboard's “Khách hàng” or “Report theo Brand” menu, where the server decrypts it for that response only. It is not written to Google Sheets or logs.
 
 ## Runtime and transition fallback
 

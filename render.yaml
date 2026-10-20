@@ -46,7 +46,10 @@ services:
     name: Dalatime-Group-report-link-registry
     runtime: node
     region: singapore
-    schedule: "20 2 * * *"
+    # Catalog sync starts every 30 minutes at :00/:30. Activate report links
+    # five minutes later so newly added customers/brands are report-ready in
+    # the same sync window without duplicating registry secrets on another job.
+    schedule: "5,35 * * * *"
     buildCommand: npm ci
     startCommand: npm run portal:ensure-active -- --apply
     envVars:
