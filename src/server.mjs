@@ -31,7 +31,12 @@ if (reportCustomers === undefined) {
   try { reportCustomers = loadReportCustomers(); }
   catch (error) { console.error(`Report config unavailable: ${error.message}`); reportCustomers = []; }
 }
-app.get('/healthz', (req, res) => res.json({ ok: true, service: 'onicorn-dashboard-system', readiness: 'process-live' }));
+app.get('/healthz', (req, res) => res.json({
+  ok: true,
+  service: 'onicorn-dashboard-system',
+  readiness: 'process-live',
+  features: { masterCatalogSync: true }
+}));
 app.get('/readyz', asyncRoute(async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });
   try { await appWithDb(async db => db.query('select 1')); res.json({ ok: true, ready: true }); }
