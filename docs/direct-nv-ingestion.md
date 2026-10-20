@@ -1,6 +1,6 @@
 # Direct NV Google Sheets ingestion
 
-`npm run sync:nv` is the production path from active employee spreadsheets to the Supabase mirror used by the dashboard and customer reports. It does not replace or modify Master sync. Master supplies only the source registry/configuration version; its rows are never ingested as employee data.
+`npm run sync:nv` is the production path from active employee spreadsheets to the Supabase mirror used by the dashboard and customer reports. Before the scheduled NV ingestion, `npm run sync:catalog` reads only Master `1. KHACH HANG` and `4. LIST BRAND` and transactionally updates the web catalog. It never writes Google Sheets and never deletes catalog rows that disappear from Master.
 
 ## Safety contract
 
