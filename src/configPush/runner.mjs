@@ -1,6 +1,7 @@
 import { connectDb } from '../db/postgres.mjs';
 import { createConfigPushApi, isPushSourceActive, readMasterConfig, runConfigPush } from './configPush.mjs';
 import { readDatabaseConfig } from './databaseConfig.mjs';
+import { isDatabaseCatalogAuthority } from '../catalog/authority.mjs';
 
 const json = value => JSON.stringify(value);
 
@@ -19,19 +20,20 @@ async function masterSnapshot(api) {
 }
 
 async function authoritySnapshot(api, db) {
-  return process.env.CATALOG_AUTHORITY === 'database' ? readDatabaseConfig(db) : masterSnapshot(api);
+  return await isDatabaseCatalogAuthority(db) ? readDatabaseConfig(db) : masterSnapshot(api);
 }
 
 export async function executeConfigPush({ production = false, db, api, log = console.log } = {}) {
-  if (production && !(process.env.CONFIG_PUSH_PRODUCTION === '1' && process.env.NODE_ENV === 'production')) {
-    throw new Error('production requires --production, CONFIG_PUSH_PRODUCTION=1, and NODE_ENV=production');
-  }
   const ownDb = !db; db ||= await connectDb(); let runId = null;
   try {
+    const databaseAuthority = await isDatabaseCatalogAuthority(db);
+    if (production && !(process.env.NODE_ENV === 'production' && (process.env.CONFIG_PUSH_PRODUCTION === '1' || databaseAuthority))) {
+      throw new Error('production requires --production, an approved database catalog cutover or CONFIG_PUSH_PRODUCTION=1, and NODE_ENV=production');
+    }
     api ||= await createConfigPushApi({ production });
     let [sources, snapshot] = await Promise.all([registry(db), authoritySnapshot(api, db)]);
     if (!sources.length) throw new Error('source registry is empty');
-    if (production && process.env.CONFIG_PUSH_FULL_ROLLOUT !== '1') {
+    if (production && process.env.CONFIG_PUSH_FULL_ROLLOUT !== '1' && !databaseAuthority) {
       const pilotIds = [...new Set(String(process.env.CONFIG_PUSH_PILOT_NV_IDS || '').split(',').map(value => value.trim().toUpperCase()).filter(Boolean))];
       if (pilotIds.length < 2 || pilotIds.length > 3) throw new Error('production pilot requires CONFIG_PUSH_PILOT_NV_IDS containing exactly 2 or 3 registry IDs; full rollout additionally requires CONFIG_PUSH_FULL_ROLLOUT=1');
       const selected = sources.filter(source => pilotIds.includes(String(source.nv_id).toUpperCase()) && isPushSourceActive(source));

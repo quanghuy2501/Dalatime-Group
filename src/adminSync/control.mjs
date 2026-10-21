@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { executeConfigPush } from '../configPush/runner.mjs';
 import { runDirectNvIngestion } from '../ingestion/directNvRunner.mjs';
+import { isDatabaseCatalogAuthority } from '../catalog/authority.mjs';
 
 export const ACTIONS = Object.freeze(['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
 export const WEBHOOK_STATUS_ACTION = 'status';
@@ -28,7 +29,10 @@ function assertProductionConfigPushConfigured(action) {
 
 export async function enqueueJob(db, { action, idempotencyKey, requestedBy }) {
   if (!isAllowedAction(action)) { const error = new Error('Action is not allowlisted'); error.statusCode = 400; throw error; }
-  assertProductionConfigPushConfigured(action);
+  if (action === 'config_push' || action === 'full_pipeline') {
+    const gate = productionConfigPushGate();
+    if (!gate.allowed && !await isDatabaseCatalogAuthority(db)) assertProductionConfigPushConfigured(action);
+  }
   if (!/^[A-Za-z0-9._:-]{8,128}$/.test(String(idempotencyKey || ''))) { const error = new Error('Idempotency key must be 8-128 safe characters'); error.statusCode = 400; throw error; }
   await db.query('begin');
   try {

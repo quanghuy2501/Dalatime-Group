@@ -11,6 +11,7 @@ import { decryptReportToken, registryKey } from './report/registry.mjs';
 import { createJobWorker, enqueueJob, isAllowedWebhookAction, retryJob, syncStatus, WEBHOOK_STATUS_ACTION, webhookStatus } from './adminSync/control.mjs';
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
 import { catalogSummary, catalogSuggestions, createCatalogRow, getStaffReport, listCatalog, listCatalogAudit, updateCatalogRow } from './admin/catalog.mjs';
+import { isDatabaseCatalogAuthority } from './catalog/authority.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
@@ -36,7 +37,7 @@ app.get('/healthz', (req, res) => res.json({
   ok: true,
   service: 'onicorn-dashboard-system',
   readiness: 'process-live',
-  features: { masterCatalogSync: true, webCatalogAdmin: true, databaseCatalogAuthority: process.env.CATALOG_AUTHORITY === 'database', boundedSheetDates: true }
+  features: { masterCatalogSync: true, webCatalogAdmin: true, databaseCatalogAuthority: Boolean(app.locals.databaseCatalogAuthority), boundedSheetDates: true }
 }));
 app.get('/readyz', asyncRoute(async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });
@@ -139,7 +140,7 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   });
 }));
 const queueCatalogPropagation = async (db, entity, row) => {
-  if (process.env.CATALOG_AUTHORITY !== 'database') return { state: 'not-cut-over', message: 'Web đã lưu; CONFIG vẫn đang lấy từ Master trong giai đoạn chuyển đổi.' };
+  if (!await isDatabaseCatalogAuthority(db)) return { state: 'not-cut-over', message: 'Web đã lưu; CONFIG vẫn đang lấy từ Master trong giai đoạn chuyển đổi.' };
   try {
     const result = await enqueueJob(db, {
       action: 'config_push',
@@ -234,5 +235,13 @@ return app;
 
 export const app = createApp();
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  app.listen(port, () => { console.log(`Onicorn Dashboard API listening on http://localhost:${port}`); app.locals.jobWorker.kick(); });
+  app.listen(port, async () => {
+    try {
+      const db = await connectDb();
+      try { app.locals.databaseCatalogAuthority = await isDatabaseCatalogAuthority(db); }
+      finally { await db.end(); }
+    } catch (error) { console.error(`[catalog-authority] detection failed: ${error?.message || 'unknown error'}`); }
+    console.log(`Onicorn Dashboard API listening on http://localhost:${port}`);
+    app.locals.jobWorker.kick();
+  });
 }

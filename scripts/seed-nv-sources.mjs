@@ -2,6 +2,7 @@
 import { createReadonlyApi, NV_SHEET } from '../src/ingestion/directNv.mjs';
 import { connectDb } from '../src/db/postgres.mjs';
 import { readMasterStaffRegistry, resolveStaffStatus } from '../src/staffStatus.mjs';
+import { isDatabaseCatalogAuthority } from '../src/catalog/authority.mjs';
 
 const clean = v => String(v ?? '').trim();
 const idFromName = name => { const m = clean(name).match(/\bNV\s*[-_ ]?(\d{1,3})\b/i); return m ? `NV${String(Number(m[1])).padStart(2, '0')}` : null; };
@@ -31,7 +32,7 @@ export function discoverNvFiles(files, { masterStaff } = {}) {
 
 export async function seedNvSources({ api, db, folderId=process.env.EMPLOYEE_FOLDER_ID, masterSpreadsheetId=process.env.MASTER_SPREADSHEET_ID, dryRun=false, masterStaff } = {}) {
   if (!folderId) throw new Error('EMPLOYEE_FOLDER_ID is required for NV source discovery');
-  if (masterStaff === undefined && process.env.CATALOG_AUTHORITY === 'database') {
+  if (masterStaff === undefined && await isDatabaseCatalogAuthority(db)) {
     const rows=(await db.query(`select nv_id,coalesce(status,raw_row->>9) status,active from staff where nv_id is not null and config_visible`)).rows;
     masterStaff=new Map(rows.map(row=>[clean(row.nv_id).toUpperCase(),{nv_id:row.nv_id,status:row.active ? row.status : 'Đã nghỉ'}]));
   }

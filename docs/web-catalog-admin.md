@@ -10,6 +10,8 @@ The flow is:
 
 Master is retained as a transition and recovery reference. The recurring Render jobs do not pull catalog rows from Master when `CATALOG_AUTHORITY=database`.
 
+Production also auto-detects the successful `catalog_authority_cutover` marker in `sync_runs`. This keeps the cutover durable when a Render Blueprint value has not yet propagated. An explicit `CATALOG_AUTHORITY=master` always wins and is the rollback switch.
+
 ## Safety contract
 
 - Migration 014 is additive. It adds web-edit fields, optimistic `change_version`, CONFIG ordering/visibility, and immutable audit rows.
