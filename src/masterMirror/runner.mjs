@@ -3,6 +3,7 @@ import { connectDb } from '../db/postgres.mjs';
 import { decryptReportToken,registryKey } from '../report/registry.mjs';
 import { ensureSheet,resizeSheet,clearSheet,writeValues } from '../google/sheetsWriter.mjs';
 import { buildCatalogSheets,buildFactSheets,fingerprintManifest,matrixHash } from './snapshot.mjs';
+import { refreshReportingReadModel } from '../reporting/readModel.mjs';
 
 const OLD_MASTER_ID='1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0';
 const REQUIRED_TABS=['1. KHACH HANG','4. LIST BRAND','2. NHAN SU','3. CHANNEL','BAO CAO SO LIEU KHACH HANG','BAO CAO NHAN VIEN','RAW_DATA','NORMALIZED','RAW_DATA_DB_STAGING','NORMALIZED_DB_STAGING'];
@@ -34,6 +35,8 @@ async function sourceSnapshot(db){
       (select coalesce(sum(source_row_count-1),0)::int from reporting_posts_canonical) duplicate_source_rows,
       (select count(*)::int from reporting_posts_canonical where posted_date>current_date) future_rows,
       (select count(*)::int from reporting_posts_current where cardinality(brand_names)=0) untagged_posts,
+      (select count(distinct case when nullif(trim(post_url),'') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)),'\\?.*$',''),'/$','') end)::int from posts_raw_sheet) source_canonical_keys,
+      (select count(*)::int from reporting_posts_canonical) canonical_rows,
       (select max(updated_at) from reporting_posts_current) watermark`)
   ]);
   return {posts:posts.rows,clients:clients.rows,brands:brands.rows,staff:staff.rows,channels:channels.rows,bonus:bonus.rows,registry:registry.rows,quality:quality.rows[0]};
@@ -174,10 +177,13 @@ export async function runMasterMirror({spreadsheetId,apply=false,db,api,log=()=>
   try{
     locked=(await db.query(`select pg_try_advisory_lock(hashtext('onicorn:master-report-mirror')) locked`)).rows[0].locked;
     if(!locked)throw new Error('another Master mirror run owns the publication lock');
+    const readModelRefresh=await refreshReportingReadModel(db);
+    if(!readModelRefresh.refreshed)throw new Error(`reporting read model unavailable: ${readModelRefresh.reason||'refresh failed'}`);
     const {map:tabMap}=await verifyTabs(api,spreadsheetId),existing=await readExistingState(api,spreadsheetId),source=await sourceSnapshot(db);
+    if(Number(source.quality.source_canonical_keys)!==Number(source.quality.canonical_rows))throw new Error('reporting read model is stale after refresh');
     const links=mergeRegistryLinks(existing.links,source.registry),facts=buildFactSheets(source.posts,{legacyState:existing.legacyState});
     const catalog=buildCatalogSheets({...source,links});
-    const manifest={spreadsheetId,sourceWatermark:source.quality.watermark,rawRows:facts.rawDataRows,normalizedRows:facts.normalizedDataRows,rawHash:facts.rawHash,normalizedHash:facts.normalizedHash,catalog:{clients:catalog.clientRows.length,brands:catalog.brandRows.length,staff:catalog.staffRows.length,channels:catalog.channelRows.length,bonus:catalog.bonusRows.length},quality:source.quality};
+    const manifest={spreadsheetId,sourceWatermark:source.quality.watermark,readModelRefreshMs:readModelRefresh.durationMs,rawRows:facts.rawDataRows,normalizedRows:facts.normalizedDataRows,rawHash:facts.rawHash,normalizedHash:facts.normalizedHash,catalog:{clients:catalog.clientRows.length,brands:catalog.brandRows.length,staff:catalog.staffRows.length,channels:catalog.channelRows.length,bonus:catalog.bonusRows.length},quality:source.quality};
     manifest.snapshotHash=fingerprintManifest(manifest);
     if(!apply)return {mode:'dry-run',durationMs:Date.now()-started,manifest};
     runId=(await db.query(`insert into master_mirror_runs(spreadsheet_id,status,source_watermark,raw_rows,normalized_rows,snapshot_hash,manifest) values($1,'running',$2,$3,$4,$5,$6) returning id`,[spreadsheetId,manifest.sourceWatermark,manifest.rawRows,manifest.normalizedRows,manifest.snapshotHash,json(manifest)])).rows[0].id;
