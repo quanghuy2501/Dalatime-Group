@@ -77,12 +77,23 @@ test('worker does not claim work when another instance owns the advisory lock', 
   assert.equal(ran, false); assert.equal(ended, true);
 });
 
-test('full pipeline maps to the three actions in safe order', async () => {
+test('full pipeline maps to all four actions in safe order and publishes the Master copy last', async () => {
   const sequence = [];
-  const runner = createActionRunner({ configPush: async () => { sequence.push('config'); return {}; }, directNv: async () => { sequence.push('nv'); return {}; } });
+  const previous = Object.fromEntries(['MASTER_MIRROR_SPREADSHEET_ID','MASTER_MIRROR_PRODUCTION'].map(key => [key, process.env[key]]));
+  process.env.MASTER_MIRROR_SPREADSHEET_ID = 'master-copy-id';
+  process.env.MASTER_MIRROR_PRODUCTION = '1';
+  const runner = createActionRunner({
+    configPush: async () => { sequence.push('config'); return {}; },
+    directNv: async () => { sequence.push('nv'); return {}; },
+    masterMirror: async options => { sequence.push(`master:${options.spreadsheetId}:${options.apply}`); return {}; }
+  });
   const db = { query: async () => { sequence.push('report'); return { rows: [{}] }; } };
-  await runner('full_pipeline', { db, log: async () => {} });
-  assert.deepEqual(sequence, ['config', 'nv', 'report', 'report']);
+  try {
+    await runner('full_pipeline', { db, log: async () => {} });
+    assert.deepEqual(sequence, ['config', 'nv', 'report', 'report', 'master:master-copy-id:true']);
+  } finally {
+    for (const [key,value] of Object.entries(previous)) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
 });
 
 test('admin endpoints preserve session auth and signed webhook is independently authenticated', async t => {
@@ -132,4 +143,6 @@ test('dashboard UI maps every API action and exposes status, failures, and retry
   const source = fs.readFileSync(new URL('../public/dashboard.js', import.meta.url), 'utf8');
   for (const action of ACTIONS) assert.match(source, new RegExp(`['"]${action}['"]`));
   assert.match(source, /failedSources/); assert.match(source, /data-retry-job/); assert.match(source, /\/api\/admin\/sync\/status/);
+  assert.match(source, /Đồng bộ ngay/);
+  assert.match(source, /Master copy/);
 });

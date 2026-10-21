@@ -535,7 +535,7 @@ const SYNC_ACTIONS = [
   ['config_push', 'Đẩy CONFIG tới NV', 'Chỉ ghi bốn vùng CONFIG được allowlist; các cờ production vẫn bắt buộc.'],
   ['direct_nv_sync', 'Đồng bộ NV → DB', 'Đọc trực tiếp file NV và xuất bản snapshot DB theo transaction.'],
   ['report_refresh_reconcile', 'Làm mới / đối soát report', 'Đối soát nguồn lỗi và số liệu phục vụ report trực tiếp từ DB.'],
-  ['full_pipeline', 'Chạy toàn bộ pipeline', 'Chạy tuần tự CONFIG → NV → DB → đối soát; dừng ngay khi một bước lỗi.']
+  ['full_pipeline', 'Đồng bộ ngay', 'Chạy tuần tự Web → CONFIG NV → Sheet NV → DB → đối soát → Master copy; dừng ngay khi một bước lỗi.']
 ];
 let syncPoll = null;
 const syncTime = value => value ? new Date(value).toLocaleString('vi-VN') : '—';
@@ -555,7 +555,7 @@ async function syncView() {
   if (busy && tab === 'sync') syncPoll = setTimeout(() => reRenderContent(), 5000);
   const latest = x.latest;
   return `<div class="sync-warning">Các nút dưới đây có thể ghi dữ liệu production. Mỗi lần chạy cần xác nhận; hệ thống khóa trùng và xếp hàng trên server.</div>
-    <div class="sync-actions">${SYNC_ACTIONS.map(([action, title, description]) => `<div class="panel sync-card"><h2>${esc(title)}</h2><p>${esc(description)}</p><button class="button ${action === 'full_pipeline' ? 'primary' : 'secondary'}" data-sync-action="${action}" ${busy ? 'disabled' : ''}>Chạy tác vụ</button></div>`).join('')}</div>
+    <div class="sync-actions">${SYNC_ACTIONS.map(([action, title, description]) => `<div class="panel sync-card"><h2>${esc(title)}</h2><p>${esc(description)}</p><button class="button ${action === 'full_pipeline' ? 'primary' : 'secondary'}" data-sync-action="${action}" ${busy ? 'disabled' : ''}>${action === 'full_pipeline' ? 'Đồng bộ ngay' : 'Chạy tác vụ'}</button></div>`).join('')}</div>
     <div class="grid2">
       <div class="panel"><h2>Lần chạy mới nhất</h2>${latest ? `<div class="sync-latest"><b>${esc(latest.action)}</b>${syncPill(latest.status)}<span>Yêu cầu: ${syncTime(latest.created_at)}</span><span>Hoàn tất: ${syncTime(latest.finished_at)}</span>${latest.error ? `<div class="error-text">${esc(latest.error)}</div>` : ''}</div>` : '<p class="empty">Chưa có lần chạy thủ công.</p>'}</div>
       <div class="panel"><h2>Nguồn thất bại gần nhất</h2>${table(x.failedSources || [], [['nv_id', 'NV'], ['google_file_id', 'File'], ['error', 'Lỗi'], [r => syncTime(r.updated_at), 'Cập nhật']])}</div>

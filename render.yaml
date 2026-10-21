@@ -19,6 +19,10 @@ services:
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: MASTER_MIRROR_SPREADSHEET_ID
+        value: 1F1-F0rtBxgWmcBQmnbrGYBG4lxG_gzpV0lcWwq3COw0
+      - key: MASTER_MIRROR_PRODUCTION
+        value: "1"
       - key: EMPLOYEE_FOLDER_ID
         value: 1sIMJ0TTPEC_hu6OBuW8hSHRLbb0Ajcr8
       - key: REPORT_PORTAL_CONFIG_FILE

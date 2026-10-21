@@ -107,6 +107,10 @@ def verify(blueprint: dict) -> None:
         raise ValueError("web catalog authority must be database")
     if str(web_env.get("CONFIG_PUSH_PRODUCTION", {}).get("value")) != "1" or str(web_env.get("CONFIG_PUSH_FULL_ROLLOUT", {}).get("value")) != "1":
         raise ValueError("web catalog saves must be allowed to queue the audited full CONFIG push")
+    if str(web_env.get("MASTER_MIRROR_PRODUCTION", {}).get("value")) != "1":
+        raise ValueError("web manual sync must explicitly enable the guarded Master mirror")
+    if web_env.get("MASTER_MIRROR_SPREADSHEET_ID", {}).get("value") != mirror_env["MASTER_MIRROR_SPREADSHEET_ID"].get("value"):
+        raise ValueError("web manual sync and cron must target the same Master reporting copy")
 
 
 def main() -> int:

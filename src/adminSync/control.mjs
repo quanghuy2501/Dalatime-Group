@@ -3,6 +3,7 @@ import { executeConfigPush } from '../configPush/runner.mjs';
 import { runDirectNvIngestion } from '../ingestion/directNvRunner.mjs';
 import { isDatabaseCatalogAuthority } from '../catalog/authority.mjs';
 import { refreshReportingReadModel } from '../reporting/readModel.mjs';
+import { runMasterMirror } from '../masterMirror/runner.mjs';
 
 export const ACTIONS = Object.freeze(['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
 export const WEBHOOK_STATUS_ACTION = 'status';
@@ -78,20 +79,30 @@ export function runCommand(command, args, { timeoutMs = 30 * 60 * 1000 } = {}) {
   });
 }
 
-export function createActionRunner({ configPush = options => executeConfigPush(options), directNv = options => runDirectNvIngestion(options) } = {}) {
+export function createActionRunner({
+  configPush = options => executeConfigPush(options),
+  directNv = options => runDirectNvIngestion(options),
+  masterMirror = options => runMasterMirror(options)
+} = {}) {
   return async (action, { db, log }) => {
     const runOne = async name => {
       await log('info', `Starting ${name}`);
       let result;
       if (name === 'config_push') result = await configPush({ production: true });
       else if (name === 'direct_nv_sync') result = await directNv();
+      else if (name === 'master_report_mirror') result = await masterMirror({
+        spreadsheetId: process.env.MASTER_MIRROR_SPREADSHEET_ID,
+        apply: true,
+        db,
+        log: event => log('info', `Master mirror: ${event.stage || 'progress'}`, event)
+      });
       else result = await reportRefreshReconcile(db);
       await log('info', `Completed ${name}`);
       return result;
     };
     if (action === 'full_pipeline') {
       const result = {};
-      for (const name of ['config_push', 'direct_nv_sync', 'report_refresh_reconcile']) result[name] = await runOne(name);
+      for (const name of ['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'master_report_mirror']) result[name] = await runOne(name);
       return result;
     }
     return runOne(action);
