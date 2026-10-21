@@ -177,7 +177,11 @@ export async function runMasterMirror({spreadsheetId,apply=false,db,api,log=()=>
   const started=Date.now();let runId,locked=false;
   try{
     locked=(await db.query(`select pg_try_advisory_lock(hashtext('onicorn:master-report-mirror')) locked`)).rows[0].locked;
-    if(!locked)throw new Error('another Master mirror run owns the publication lock');
+    if(!locked){
+      const error=new Error('another Master mirror run owns the publication lock');
+      error.code='MASTER_MIRROR_LOCK_BUSY';
+      throw error;
+    }
     const readModelRefresh=await refreshReportingReadModel(db);
     if(!readModelRefresh.refreshed)throw new Error(`reporting read model unavailable: ${readModelRefresh.reason||'refresh failed'}`);
     const {map:tabMap}=await verifyTabs(api,spreadsheetId),existing=await readExistingState(api,spreadsheetId),source=await sourceSnapshot(db);

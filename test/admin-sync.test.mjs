@@ -96,6 +96,56 @@ test('full pipeline maps to all four actions in safe order and publishes the Mas
   }
 });
 
+test('manual full pipeline waits for a scheduled Master mirror lock and then continues', async () => {
+  let attempts = 0;
+  const delays = [], logs = [];
+  const runner = createActionRunner({
+    configPush: async () => ({}),
+    directNv: async () => ({}),
+    masterMirror: async () => {
+      attempts++;
+      if (attempts === 1) {
+        const error = new Error('another Master mirror run owns the publication lock');
+        error.code = 'MASTER_MIRROR_LOCK_BUSY';
+        throw error;
+      }
+      return { mode: 'applied' };
+    },
+    sleep: async ms => { delays.push(ms); },
+    masterMirrorLockWaitMs: 30000,
+    masterMirrorLockPollMs: 10000
+  });
+  const db = { query: async () => ({ rows: [{}] }) };
+  const result = await runner('full_pipeline', { db, log: async (...entry) => { logs.push(entry); } });
+  assert.equal(attempts, 2);
+  assert.deepEqual(delays, [10000]);
+  assert.equal(result.master_report_mirror.mode, 'applied');
+  assert.ok(logs.some(([level, message]) => level === 'warn' && /tự chờ và chạy tiếp/.test(message)));
+});
+
+test('manual full pipeline stops after the bounded Master mirror lock wait', async () => {
+  let attempts = 0;
+  const runner = createActionRunner({
+    configPush: async () => ({}),
+    directNv: async () => ({}),
+    masterMirror: async () => {
+      attempts++;
+      const error = new Error('another Master mirror run owns the publication lock');
+      error.code = 'MASTER_MIRROR_LOCK_BUSY';
+      throw error;
+    },
+    sleep: async () => {},
+    masterMirrorLockWaitMs: 20000,
+    masterMirrorLockPollMs: 10000
+  });
+  const db = { query: async () => ({ rows: [{}] }) };
+  await assert.rejects(
+    () => runner('full_pipeline', { db, log: async () => {} }),
+    error => error.code === 'MASTER_MIRROR_LOCK_WAIT_TIMEOUT' && /20000ms/.test(error.message)
+  );
+  assert.equal(attempts, 3);
+});
+
 test('admin endpoints preserve session auth and signed webhook is independently authenticated', async t => {
   const previous = Object.fromEntries(['NODE_ENV','CONFIG_PUSH_PRODUCTION','DASHBOARD_BASIC_USER','DASHBOARD_BASIC_PASS','AUTH_SESSION_SECRET','ADMIN_SYNC_WEBHOOK_SECRET'].map(k => [k, process.env[k]]));
   Object.assign(process.env, { NODE_ENV: 'production', CONFIG_PUSH_PRODUCTION: '1', DASHBOARD_BASIC_USER: 'admin', DASHBOARD_BASIC_PASS: 'pass', AUTH_SESSION_SECRET: 'session-secret', ADMIN_SYNC_WEBHOOK_SECRET: 'webhook-secret' });

@@ -11,6 +11,10 @@ export const WEBHOOK_ACTIONS = Object.freeze(['config_push', WEBHOOK_STATUS_ACTI
 export const isAllowedAction = action => ACTIONS.includes(action);
 export const isAllowedWebhookAction = action => WEBHOOK_ACTIONS.includes(action);
 const clean = value => String(value ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 2000);
+const positiveDuration = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
 
 export function productionConfigPushGate(env = process.env) {
   const missing = [];
@@ -82,20 +86,43 @@ export function runCommand(command, args, { timeoutMs = 30 * 60 * 1000 } = {}) {
 export function createActionRunner({
   configPush = options => executeConfigPush(options),
   directNv = options => runDirectNvIngestion(options),
-  masterMirror = options => runMasterMirror(options)
+  masterMirror = options => runMasterMirror(options),
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  masterMirrorLockWaitMs = positiveDuration(process.env.MASTER_MIRROR_LOCK_WAIT_MS, 8 * 60 * 1000),
+  masterMirrorLockPollMs = positiveDuration(process.env.MASTER_MIRROR_LOCK_POLL_MS, 10 * 1000)
 } = {}) {
   return async (action, { db, log }) => {
+    const runMasterMirrorWithLockWait = async () => {
+      let waitedMs = 0;
+      for (;;) {
+        try {
+          return await masterMirror({
+            spreadsheetId: process.env.MASTER_MIRROR_SPREADSHEET_ID,
+            apply: true,
+            db,
+            log: event => log('info', `Master mirror: ${event.stage || 'progress'}`, event)
+          });
+        } catch (error) {
+          if (error?.code !== 'MASTER_MIRROR_LOCK_BUSY') throw error;
+          const remainingMs = Math.max(0, masterMirrorLockWaitMs - waitedMs);
+          if (remainingMs === 0) {
+            const timeout = new Error(`Master mirror remained busy for ${masterMirrorLockWaitMs}ms; retry the sync after the scheduled run finishes`);
+            timeout.code = 'MASTER_MIRROR_LOCK_WAIT_TIMEOUT';
+            throw timeout;
+          }
+          const delayMs = Math.min(Math.max(1, masterMirrorLockPollMs), remainingMs);
+          await log('warn', 'Master mirror đang bận do cron; tác vụ sẽ tự chờ và chạy tiếp', { waitedMs, remainingMs, nextRetryMs: delayMs });
+          await sleep(delayMs);
+          waitedMs += delayMs;
+        }
+      }
+    };
     const runOne = async name => {
       await log('info', `Starting ${name}`);
       let result;
       if (name === 'config_push') result = await configPush({ production: true });
       else if (name === 'direct_nv_sync') result = await directNv();
-      else if (name === 'master_report_mirror') result = await masterMirror({
-        spreadsheetId: process.env.MASTER_MIRROR_SPREADSHEET_ID,
-        apply: true,
-        db,
-        log: event => log('info', `Master mirror: ${event.stage || 'progress'}`, event)
-      });
+      else if (name === 'master_report_mirror') result = await runMasterMirrorWithLockWait();
       else result = await reportRefreshReconcile(db);
       await log('info', `Completed ${name}`);
       return result;
