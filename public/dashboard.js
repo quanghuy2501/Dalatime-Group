@@ -428,7 +428,7 @@ const manageActions = (entity,row) => {
 
 function managementColumns(entity) {
   const action = [row => manageActions(entity,row),'Thao tác'];
-  if (entity === 'clients') return [['code','Mã KH'],['name','Khách hàng'],['phone','Điện thoại'],['contact_name','Liên hệ'],[row=>fmt(row.related_count),'Brand'],[manageStatePill,'Trạng thái'],action];
+  if (entity === 'clients') return [['code','Mã KH'],['name','Khách hàng'],['phone','Điện thoại'],['contact_name','Liên hệ'],['status','Tình trạng HĐ'],[row=>fmt(row.related_count),'Brand'],[manageStatePill,'Hoạt động'],action];
   if (entity === 'brands') return [['code','Mã brand'],['name','Brand'],['client_name','Khách hàng'],['group_name','Nhóm'],['status','Tình trạng'],[manageStatePill,'Hoạt động'],action];
   if (entity === 'staff') return [['code','Mã NV'],['name','Nhân sự'],['role','Vị trí'],[row=>fmt(row.related_count),'Kênh'],['source_status','Nguồn Sheet'],[manageStatePill,'Tình trạng'],action];
   return [['code','Mã kênh'],['name','Kênh'],['username','Username'],['owner_name','Phụ trách'],[row=>fmt(row.follower),'Follower'],[manageStatePill,'Tình trạng'],action];
@@ -514,7 +514,7 @@ async function openStaffReport(id) {
 async function links() {
   const x = await api('/api/admin/report-links');
   return `<div class="panel"><h2>🏢 Khách hàng</h2><p class="muted">Bấm <b>Mở report</b> để xem báo cáo riêng của từng khách hàng.</p>${table(x.clients, [
-    ['client_code', 'Mã KH'], ['name', 'Khách hàng'],
+    ['client_code', 'Mã KH'], ['name', 'Khách hàng'], ['business_status','Tình trạng HĐ'],
     [r => `<span class="pill ${r.active ? '' : 'neutral'}">${r.active ? 'Active' : 'Inactive'}</span>`, 'Trạng thái'],
     [r => `<span class="pill ${r.reportPath ? '' : 'neutral'}">${esc({ready:'Sẵn sàng',missing:'Chưa có','hash-only':'Đã import — cần rotate',revoked:'Đã thu hồi',inactive:'Inactive'}[r.linkState] || r.linkState)}</span>`, 'Link báo cáo'],
     [r => r.reportPath ? `<a class="button small" href="${esc(r.reportPath)}" target="_blank" rel="noopener">Mở report</a>` : '<span class="muted">—</span>', 'Báo cáo']
@@ -524,7 +524,7 @@ async function links() {
 async function brandReports() {
   const x = await api('/api/admin/report-links');
   return `<div class="panel"><h2>🔗 Report theo Brand</h2><p class="muted">Mỗi link chỉ cấp quyền xem đúng một brand. Brand trùng tên sau chuẩn hóa được khóa an toàn vì dữ liệu bài hiện chỉ lưu tên brand.</p>${table(x.brands || [], [
-    ['brand_code', 'Mã brand'], ['name', 'Brand'], ['client_name', 'Khách hàng'],
+    ['brand_code', 'Mã brand'], ['name', 'Brand'], ['client_name', 'Khách hàng'], ['business_status','Tình trạng HĐ'],
     [r => `<span class="pill ${r.active ? '' : 'neutral'}">${r.active ? 'Active' : 'Inactive'}</span>`, 'Trạng thái'],
     [r => r.ambiguous ? '<span class="pill bad">Trùng tên — đã khóa</span>' : `<span class="pill ${r.reportPath ? '' : 'neutral'}">${esc({ready:'Sẵn sàng',missing:'Chưa có','hash-only':'Đã import — cần rotate',revoked:'Đã thu hồi',inactive:'Inactive'}[r.linkState] || r.linkState)}</span>`, 'Link riêng'],
     [r => r.reportPath ? `<a class="button small" href="${esc(r.reportPath)}" target="_blank" rel="noopener">Mở report</a>` : '<span class="muted">—</span>', 'Báo cáo']

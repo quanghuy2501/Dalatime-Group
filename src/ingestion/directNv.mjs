@@ -111,7 +111,7 @@ const malformedLimit = () => {
 
 function rowDiagnostic(error, sourceRow, values) {
   const reason = String(error?.message || error).slice(0, 500);
-  return { sourceRow, reason, raw: values.slice(0, 22) };
+  return { sourceRow, reason, populatedColumns:values.slice(0,22).map((value,index)=>clean(value)?index+1:null).filter(Boolean) };
 }
 
 export async function readSource(api, source, { pageRows=500, pageTimeoutMs=120000, sourceTimeoutMs=120000,
@@ -184,7 +184,7 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       if (!valid.length || ratio > malformedLimit()) {
         const detail = { message: !valid.length ? 'no valid employee rows' : `malformed row ratio ${ratio.toFixed(3)} exceeds ${malformedLimit()}`, skipped };
         await checkpoint({source,nextRow:1,rowsRead:input.length,status:'fail',error:JSON.stringify(detail).slice(0,2000)});
-        throw new Error(`${source.nv_id}: ${detail.message}`);
+        const failure=new Error(`${source.nv_id}: ${detail.message}`);failure.nvDetail=detail;throw failure;
       }
       if (skipped.length) await checkpoint({source,nextRow:1,rowsRead:input.length,status:'ok',error:JSON.stringify({skipped}).slice(0,2000)});
       progress({event:'source',status:'ok',nvId:source.nv_id,rows:valid.length,attempt:attempt+1});
@@ -194,7 +194,8 @@ export async function collectNvRows({ api, sources, configVersion, concurrency=2
       progress({event:'source',status:attempt<sourceRetries?'retrying':'fail',nvId:source.nv_id,attempt:attempt+1,error:String(error.message)});
       if(attempt<sourceRetries) continue;
     }
-    await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:String(lastError.message).slice(0,2000)});
+    const safeError=lastError?.nvDetail?{message:String(lastError.message),skipped:lastError.nvDetail.skipped}:String(lastError.message);
+    await checkpoint({source,nextRow:1,rowsRead:0,status:'fail',error:(typeof safeError==='string'?safeError:JSON.stringify(safeError)).slice(0,2000)});
     return {error:lastError,source};
   });
   const failures=groups.filter(group=>group?.error);

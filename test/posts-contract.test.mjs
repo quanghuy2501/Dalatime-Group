@@ -28,7 +28,8 @@ test('Posts query exposes canonical brands, every engagement metric, flags, URL,
   assert.match(calls[0].sql, /p\.posted_date::text as posted_date/, 'DATE must stay YYYY-MM-DD across JSON/timezones');
   assert.match(calls[0].sql, /p\.posted_date >=/);
   assert.match(calls[0].sql, /p\.posted_date <=/);
-  assert.match(calls[0].sql, /post_brands_sheet/);
+  assert.match(calls[0].sql, /reporting_posts_current/);
+  assert.match(calls[0].sql, /unnest\(p\.brand_names\)/);
 });
 
 test('brand mirror schema supports the direct-NV upsert updated_at contract', () => {

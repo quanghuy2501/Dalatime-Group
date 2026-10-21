@@ -82,7 +82,7 @@ test('full pipeline maps to the three actions in safe order', async () => {
   const runner = createActionRunner({ configPush: async () => { sequence.push('config'); return {}; }, directNv: async () => { sequence.push('nv'); return {}; } });
   const db = { query: async () => { sequence.push('report'); return { rows: [{}] }; } };
   await runner('full_pipeline', { db, log: async () => {} });
-  assert.deepEqual(sequence, ['config', 'nv', 'report']);
+  assert.deepEqual(sequence, ['config', 'nv', 'report', 'report']);
 });
 
 test('admin endpoints preserve session auth and signed webhook is independently authenticated', async t => {

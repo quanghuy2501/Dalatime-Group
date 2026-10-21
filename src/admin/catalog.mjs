@@ -36,7 +36,8 @@ const definitions = Object.freeze({
         select name from clients where client_code=b.client_code order by active desc,updated_at desc,id limit 1
       ) c on true left join (
         select lower(trim(brand_name)) brand_key,count(*)::int related_count
-        from post_brands_sheet group by lower(trim(brand_name))
+        from reporting_posts_current p cross join lateral unnest(p.brand_names) brand_name
+        group by lower(trim(brand_name))
       ) pc on pc.brand_key=lower(trim(b.name))`
   }),
   staff: Object.freeze({
@@ -62,7 +63,7 @@ const definitions = Object.freeze({
       coalesce(pc.related_count,0) related_count
       from channels c left join staff s on s.id=c.owner_staff_id left join (
         select lower(trim(channel_name)) channel_key,count(*)::int related_count
-        from posts_raw_sheet group by lower(trim(channel_name))
+        from reporting_posts_current group by lower(trim(channel_name))
       ) pc on pc.channel_key=lower(trim(c.name))`
   })
 });
@@ -288,10 +289,10 @@ export async function getStaffReport(db,id,{from='',to='',limit=300}={}){
       coalesce(sum(bonus_amount),0)::bigint bonus,
       case when coalesce(sum(realtime_view),0)>0 then
         (sum(coalesce(realtime_like,0)+coalesce(realtime_comment,0)+coalesce(realtime_save,0)+coalesce(realtime_share,0))::numeric/sum(realtime_view)) else 0 end er,
-      min(posted_date) from_date,max(posted_date) to_date from posts_raw_sheet p where ${filter}`,values),
+      min(posted_date) from_date,max(posted_date) to_date from reporting_posts_current p where ${filter}`,values),
     db.query(`select p.posted_date::text posted_date,p.brand_text_raw,p.channel_name,p.post_url,p.realtime_view,p.realtime_like,
       p.realtime_comment,p.realtime_save,p.realtime_share,p.viral_label,p.bonus_amount
-      from posts_raw_sheet p where ${filter} order by p.posted_date desc nulls last,p.realtime_view desc nulls last limit ${safeLimit}`,values),
+      from reporting_posts_current p where ${filter} order by p.posted_date desc nulls last,p.realtime_view desc nulls last limit ${safeLimit}`,values),
     db.query(`select c.channel_code code,c.name,c.username,c.follower,c.active from channels c
       where c.owner_staff_id=$1 or lower(trim(c.owner_name))=lower(trim($2)) order by c.active desc,c.name`,[staff.id,staff.name])
   ]);

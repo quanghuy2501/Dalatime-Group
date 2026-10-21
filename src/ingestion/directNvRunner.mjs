@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { connectDb, upsert } from '../db/postgres.mjs';
 import { COLUMN_MAPPING, NvTimeoutError, collectNvRows, createReadonlyApi, discoverSources, splitBrands, validateMapping } from './directNv.mjs';
+import { refreshReportingReadModel } from '../reporting/readModel.mjs';
 
 const json = value => JSON.stringify(value);
 
@@ -90,7 +91,7 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount,
 export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Number(process.env.NV_CONCURRENCY||2),pageRows=Number(process.env.NV_PAGE_ROWS||500),
   pageTimeoutMs=positiveInt(process.env.NV_PAGE_TIMEOUT_MS,120000),sourceTimeoutMs=positiveInt(process.env.NV_SOURCE_TIMEOUT_MS,120000),
   totalTimeoutMs=positiveInt(process.env.NV_TOTAL_TIMEOUT_MS,1500000),heartbeatMs=positiveInt(process.env.NV_HEARTBEAT_MS,30000),
-  sourceRetries=positiveInt(process.env.NV_SOURCE_RETRIES,1),publisher=publishNvRows,log=defaultLog }={}) {
+  sourceRetries=positiveInt(process.env.NV_SOURCE_RETRIES,1),publisher=publishNvRows,readModelRefresher,log=defaultLog }={}) {
   db ||= await connectDb(); let runId; let ownDb=!arguments[0]?.db;
   let dbQueue=Promise.resolve(); let heartbeat; const startedAt=Date.now(); let terminal=false; let locked=false;
   const deadlineAt=startedAt+totalTimeoutMs;
@@ -137,9 +138,11 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
     } catch(error) { await db.query('rollback'); throw error; }
     assertActive();
     const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now()),diagnostics});
+    readModelRefresher ||= publisher===publishNvRows ? refreshReportingReadModel : async()=>({refreshed:false,reason:'custom-publisher'});
+    const readModel=await readModelRefresher(db);
     assertActive();
-    terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result});
-    return result;
+    terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result,readModel});
+    return {...result,readModel};
   } catch(error) {
     if(runId) await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,error=$2 where id=$1`,[runId,String(error.message).slice(0,2000)])).catch(()=>{});
     terminal=true; progress({event:'final',status:'blocked',error:String(error.message),lastKnownGoodPreserved:true});

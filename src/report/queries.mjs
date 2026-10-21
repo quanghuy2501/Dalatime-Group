@@ -1,7 +1,7 @@
 function addFilters(where, vals, params, alias = 'p') {
   if (params.from) { vals.push(params.from); where.push(`${alias}.posted_date >= $${vals.length}`); }
   if (params.to) { vals.push(params.to); where.push(`${alias}.posted_date <= $${vals.length}`); }
-  if (params.brand) { vals.push(params.brand); where.push(`exists (select 1 from post_brands_sheet pbf where pbf.raw_sheet_row_key=${alias}.row_key and lower(trim(pbf.brand_name))=lower(trim($${vals.length})))`); }
+  if (params.brand) { vals.push(params.brand); where.push(`exists (select 1 from unnest(${alias}.brand_names) pbf(brand_name) where lower(trim(pbf.brand_name))=lower(trim($${vals.length})))`); }
   if (params.channel) { vals.push(params.channel); where.push(`${alias}.channel_name = $${vals.length}`); }
 }
 
@@ -10,23 +10,15 @@ function addFilters(where, vals, params, alias = 'p') {
 const canonicalBrandSql = value => `lower(regexp_replace(trim(${value}), '\\s+', ' ', 'g'))`;
 
 function dedupedSource() {
-  // Customer reports must show one row per post URL. The exact mirror remains
-  // unchanged for admin parity; only this read-only portal scope is deduped.
-  return `(select distinct on (case when nullif(trim(post_url), '') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)), '\\?.*$', ''), '/$', '') end) *
-    from posts_raw_sheet
-    where exists (select 1 from post_brands_sheet pb0
-      join brands b0 on lower(trim(b0.name))=lower(trim(pb0.brand_name))
-      where pb0.raw_sheet_row_key=posts_raw_sheet.row_key and b0.active=true and b0.client_code=$1)
-    order by case when nullif(trim(post_url), '') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)), '\\?.*$', ''), '/$', '') end,
-      updated_at desc nulls last, row_key desc) p`;
+  return `reporting_posts_current p`;
 }
 
 function scoped(clientCode, params = {}) {
   const vals = [clientCode];
   const where = [`exists (
-    select 1 from post_brands_sheet pb
-    join brands b on lower(trim(b.name))=lower(trim(pb.brand_name))
-    where pb.raw_sheet_row_key=p.row_key and b.active=true and b.client_code=$1
+    select 1 from unnest(p.brand_names) pb(brand_name)
+    join brands b on ${canonicalBrandSql('b.name')}=${canonicalBrandSql('pb.brand_name')}
+    where b.active=true and b.client_code=$1
   )`];
   addFilters(where, vals, params);
   return { vals, whereSql: where.join(' and ') };
@@ -37,17 +29,17 @@ export async function getReportScope(db, clientCode) {
   if (!client) return null;
   const brands = (await db.query(`select distinct b.name
     from brands b where b.client_code=$1 and b.active=true order by b.name`, [clientCode])).rows.map(row => row.name);
-  const channels = (await db.query(`select distinct p.channel_name as name from posts_raw_sheet p
+  const channels = (await db.query(`select distinct p.channel_name as name from reporting_posts_current p
     where p.channel_name is not null and p.channel_name <> '' and exists (
-      select 1 from post_brands_sheet pb join brands b on lower(trim(b.name))=lower(trim(pb.brand_name))
-      where pb.raw_sheet_row_key=p.row_key and b.active=true and b.client_code=$1
+      select 1 from unnest(p.brand_names) pb(brand_name) join brands b on ${canonicalBrandSql('b.name')}=${canonicalBrandSql('pb.brand_name')}
+      where b.active=true and b.client_code=$1
     ) order by name`, [clientCode])).rows.map(row => row.name);
   return { customerName: client.name, brands, channels };
 }
 
 export async function getReportStatus(db, clientCode, scope) {
   const sync = (await db.query(`select finished_at from sync_runs
-    where status in ('ok','partial') and finished_at is not null order by finished_at desc limit 1`)).rows[0];
+    where run_type='direct_nv_ingestion' and status in ('ok','partial') and finished_at is not null order by finished_at desc limit 1`)).rows[0];
   return { ok: true, reportType: 'customer', customerName: scope.customerName, brands: scope.brands, channels: scope.channels, lastSyncAt: sync?.finished_at || null };
 }
 
@@ -85,8 +77,8 @@ export async function getReportPosts(db, clientCode, params = {}) {
   const countVals = vals.slice();
   vals.push(limit, offset);
   const rows = db.query(`select p.posted_date::text as posted_date, (select string_agg(distinct pbl.brand_name, ', ' order by pbl.brand_name)
-      from post_brands_sheet pbl join brands bl on lower(trim(bl.name))=lower(trim(pbl.brand_name))
-      where pbl.raw_sheet_row_key=p.row_key and bl.active=true and bl.client_code=$1) as brand_names,
+      from unnest(p.brand_names) pbl(brand_name) join brands bl on ${canonicalBrandSql('bl.name')}=${canonicalBrandSql('pbl.brand_name')}
+      where bl.active=true and bl.client_code=$1) as brand_names,
     p.channel_name, p.post_url,
     p.realtime_view, p.realtime_like, p.realtime_comment, p.realtime_save, p.realtime_share,
     p.engagement_rate, p.is_exclusive, p.viral_label
@@ -98,17 +90,12 @@ export async function getReportPosts(db, clientCode, params = {}) {
 }
 
 function dedupedBrandSource() {
-  return `(select distinct on (case when nullif(trim(post_url), '') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)), '\\?.*$', ''), '/$', '') end) *
-    from posts_raw_sheet
-    where exists (select 1 from post_brands_sheet pb0
-      where pb0.raw_sheet_row_key=posts_raw_sheet.row_key and ${canonicalBrandSql('pb0.brand_name')}=${canonicalBrandSql('$1')})
-    order by case when nullif(trim(post_url), '') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)), '\\?.*$', ''), '/$', '') end,
-      updated_at desc nulls last, row_key desc) p`;
+  return `reporting_posts_current p`;
 }
 
 function brandScoped(brandName, params = {}) {
   const vals = [brandName];
-  const where = [`exists (select 1 from post_brands_sheet pb where pb.raw_sheet_row_key=p.row_key and ${canonicalBrandSql('pb.brand_name')}=${canonicalBrandSql('$1')})`];
+  const where = [`exists (select 1 from unnest(p.brand_names) pb(brand_name) where ${canonicalBrandSql('pb.brand_name')}=${canonicalBrandSql('$1')})`];
   addFilters(where, vals, { ...params, brand: undefined });
   return { vals, whereSql: where.join(' and ') };
 }
@@ -123,17 +110,17 @@ export async function getBrandReportScope(db, brandCode) {
   // post_brands_sheet contains names, not brand IDs. Two active master rows with
   // the same canonical name cannot be separated safely, so deny both reports.
   if (collisions.rows.length !== 1 || collisions.rows[0].brand_code !== brand.brand_code) return null;
-  const channels = (await db.query(`select distinct p.channel_name as name from posts_raw_sheet p
+  const channels = (await db.query(`select distinct p.channel_name as name from reporting_posts_current p
     where p.channel_name is not null and p.channel_name <> '' and exists (
-      select 1 from post_brands_sheet pb where pb.raw_sheet_row_key=p.row_key
-        and ${canonicalBrandSql('pb.brand_name')}=${canonicalBrandSql('$1')}
+      select 1 from unnest(p.brand_names) pb(brand_name)
+      where ${canonicalBrandSql('pb.brand_name')}=${canonicalBrandSql('$1')}
     ) order by name`, [brand.name])).rows.map(row => row.name);
   return { reportType: 'brand', brandCode: brand.brand_code, brandName: brand.name, customerName: brand.name, clientCode: brand.client_code, clientName: brand.client_name, brands: [brand.name], channels };
 }
 
 export async function getBrandReportStatus(db, scope) {
   const sync = (await db.query(`select finished_at from sync_runs
-    where status in ('ok','partial') and finished_at is not null order by finished_at desc limit 1`)).rows[0];
+    where run_type='direct_nv_ingestion' and status in ('ok','partial') and finished_at is not null order by finished_at desc limit 1`)).rows[0];
   return { ok: true, reportType: 'brand', customerName: scope.brandName, brandName: scope.brandName, brands: scope.brands, channels: scope.channels, lastSyncAt: sync?.finished_at || null };
 }
 

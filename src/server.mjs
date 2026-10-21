@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { connectDb } from './db/postgres.mjs';
@@ -27,6 +26,7 @@ function validRange(query) {
 
 export function createApp({ dbConnector = connectDb, reportCustomers, jobWorker } = {}) {
 const app = express();
+app.set('trust proxy', 1);
 jobWorker ||= createJobWorker({ dbConnector });
 app.locals.jobWorker = jobWorker;
 if (reportCustomers === undefined) {
@@ -48,14 +48,33 @@ const appWithDb = async fn => {
   const db = await dbConnector();
   try { return await fn(db); } finally { await db.end(); }
 };
-app.use(cors());
+app.use((_req,res,next)=>{
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('X-Frame-Options','DENY');
+  res.setHeader('Referrer-Policy','no-referrer');
+  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
+  if(process.env.NODE_ENV==='production')res.setHeader('Strict-Transport-Security','max-age=31536000; includeSubDomains');
+  next();
+});
 app.use(express.json({ verify: (req, _res, buffer) => { req.rawBody = buffer.toString('utf8'); } }));
 app.use(express.urlencoded({ extended: false }));
 app.get('/login', (req, res) => res.sendFile(path.join(publicDir, 'login.html')));
+const loginFailures=new Map();
+const loginWindowMs=Number(process.env.LOGIN_RATE_WINDOW_MS||15*60*1000);
+const loginMaxFailures=Number(process.env.LOGIN_RATE_MAX_FAILURES||10);
 app.post('/auth/login', (req, res) => {
   if (!process.env.AUTH_SESSION_SECRET) return res.status(503).json({ ok: false, error: 'AUTH_SESSION_SECRET is not configured' });
-  if (!credentialsMatch(String(req.body.username || ''), String(req.body.password || ''))) return res.status(401).json({ ok: false, error: 'Tên đăng nhập hoặc mật khẩu không đúng' });
-  res.setHeader('Set-Cookie', createSessionCookie());
+  const key=String(req.ip||req.socket?.remoteAddress||'unknown'),now=Date.now();
+  const prior=loginFailures.get(key);
+  const state=!prior||now-prior.startedAt>=loginWindowMs?{startedAt:now,count:0}:prior;
+  if(state.count>=loginMaxFailures)return res.status(429).json({ok:false,error:'Đăng nhập tạm khóa do thử sai quá nhiều, vui lòng thử lại sau'});
+  const username=String(req.body.username||''),password=String(req.body.password||'');
+  if (!credentialsMatch(username,password)) {
+    state.count+=1;loginFailures.set(key,state);
+    return res.status(401).json({ ok: false, error: 'Tên đăng nhập hoặc mật khẩu không đúng' });
+  }
+  loginFailures.delete(key);
+  res.setHeader('Set-Cookie', createSessionCookie(undefined,username));
   res.json({ ok: true, redirect: '/' });
 });
 app.post('/auth/logout', (req, res) => { res.setHeader('Set-Cookie', clearSessionCookie()); res.json({ ok: true }); });
@@ -88,6 +107,7 @@ app.post('/api/admin/sync/webhook', asyncRoute(async (req, res) => {
   res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
 }));
 app.use(authMiddleware);
+const actor=req=>req.auth?.user||'dashboard-session';
 app.use('/report', createReportRouter({ customers: reportCustomers, withDb: appWithDb, publicDir }));
 app.use('/api/report', createReportApiRouter({ customers: reportCustomers, withDb: appWithDb }));
 app.use(express.static(publicDir));
@@ -96,8 +116,8 @@ app.use('/api', (req, res, next) => validRange(req.query) ? next() : res.status(
 
 app.get('/api/status', asyncRoute(async (req, res) => {
   const data = await appWithDb(async db => (await db.query(`select now() as now,
-    (select max(finished_at) from sync_runs where status in ('ok','partial')) as "lastSyncAt",
-    (select max(updated_at) from posts_raw_sheet) as "mirrorUpdatedAt"`)).rows[0]);
+    (select max(finished_at) from sync_runs where run_type='direct_nv_ingestion' and status in ('ok','partial')) as "lastSyncAt",
+    (select max(updated_at) from reporting_posts_canonical) as "mirrorUpdatedAt"`)).rows[0]);
   res.json({ ok: true, ...data, service: 'onicorn-dashboard-system' });
 }));
 app.get('/api/overview', asyncRoute(async (req, res) => res.json(await appWithDb(db => getOverview(db, req.query)))));
@@ -115,10 +135,10 @@ app.get('/api/heatmap', asyncRoute(async (req, res) => res.json(await appWithDb(
 app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   const key = registryKey();
   const { clients, brands } = await appWithDb(async db => ({
-    clients: (await db.query(`select c.client_code,c.name,c.active,r.status,r.token_ciphertext,r.token_iv,r.token_tag,r.created_at,r.rotated_at
+    clients: (await db.query(`select c.client_code,c.name,c.status business_status,c.active,r.status,r.token_ciphertext,r.token_iv,r.token_tag,r.created_at,r.rotated_at
       from clients c left join report_link_registry r on r.scope='customer' and r.object_code=c.client_code
       order by c.active desc,c.name,c.client_code`)).rows,
-    brands: (await db.query(`select b.brand_code,b.name,b.client_code,b.client_name,b.active,
+    brands: (await db.query(`select b.brand_code,b.name,b.client_code,b.client_name,b.status business_status,b.active,
       count(*) filter (where b.active) over (partition by lower(regexp_replace(trim(b.name), '\\s+', ' ', 'g')))::int as canonical_count,
       r.status,r.token_ciphertext,r.token_iv,r.token_tag,r.created_at,r.rotated_at
       from brands b left join report_link_registry r on r.scope='brand' and r.object_code=b.brand_code
@@ -139,13 +159,13 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
     operations: { import: 'npm run portal:import-config -- --apply <config>', importLegacy: 'npm run portal:import-legacy-links -- --apply <export>', ensure: 'npm run portal:ensure-active -- --apply' }
   });
 }));
-const queueCatalogPropagation = async (db, entity, row) => {
+const queueCatalogPropagation = async (db, entity, row, requestedBy) => {
   if (!await isDatabaseCatalogAuthority(db)) return { state: 'not-cut-over', message: 'Web đã lưu; CONFIG vẫn đang lấy từ Master trong giai đoạn chuyển đổi.' };
   try {
     const result = await enqueueJob(db, {
       action: 'config_push',
       idempotencyKey: `catalog:${entity}:${row.id}:${row.change_version}`,
-      requestedBy: 'dashboard-catalog'
+      requestedBy
     });
     jobWorker.kick();
     return { state: result.duplicate ? 'already-queued' : 'queued', jobId: result.job?.id || null };
@@ -160,15 +180,15 @@ app.get('/api/admin/reports/staff/:id', asyncRoute(async (req,res)=>res.json(awa
 app.get('/api/admin/catalog/:entity', asyncRoute(async (req,res)=>res.json(await appWithDb(db=>listCatalog(db,req.params.entity,req.query)))));
 app.post('/api/admin/catalog/:entity', asyncRoute(async (req,res)=>{
   const result=await appWithDb(async db=>{
-    const saved=await createCatalogRow(db,req.params.entity,req.body,'dashboard-session');
-    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row)};
+    const saved=await createCatalogRow(db,req.params.entity,req.body,actor(req));
+    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row,actor(req))};
   });
   res.status(201).json({ok:true,...result});
 }));
 app.patch('/api/admin/catalog/:entity/:id', asyncRoute(async (req,res)=>{
   const result=await appWithDb(async db=>{
-    const saved=await updateCatalogRow(db,req.params.entity,req.params.id,req.body,'dashboard-session');
-    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row)};
+    const saved=await updateCatalogRow(db,req.params.entity,req.params.id,req.body,actor(req));
+    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row,actor(req))};
   });
   res.json({ok:true,...result});
 }));
@@ -188,13 +208,13 @@ app.post('/api/admin/sync/actions', asyncRoute(async (req, res) => {
   const result = await appWithDb(db => enqueueJob(db, {
     action: req.body?.action,
     idempotencyKey: req.get('Idempotency-Key') || req.body?.idempotencyKey,
-    requestedBy: 'dashboard-session'
+    requestedBy: actor(req)
   }));
   jobWorker.kick();
   res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
 }));
 app.post('/api/admin/sync/jobs/:id/retry', asyncRoute(async (req, res) => {
-  const result = await appWithDb(db => retryJob(db, req.params.id, 'dashboard-session'));
+  const result = await appWithDb(db => retryJob(db, req.params.id, actor(req)));
   jobWorker.kick();
   res.status(result.duplicate ? 200 : 202).json({ ok: true, duplicate: result.duplicate, job: result.job });
 }));
@@ -203,16 +223,13 @@ app.get('/api/health', asyncRoute(async (req, res) => res.json(await appWithDb(d
 app.get('/api/dashboard', asyncRoute(async (req, res) => {
   const started = Date.now();
   try {
-    // Keep one connection for the request, but issue independent read-only queries together.
-    // pg queues these safely on the same client and avoids repeated connection setup.
-    const data = await appWithDb(async db => {
-      const [overview, brands, staff, channels, health, timeseries, alerts, masters, heatmap] = await Promise.all([
-        getOverview(db, req.query), getTopBrands(db, 20, req.query), getTopStaff(db, 20, req.query),
-        getTopChannels(db, 20, req.query), getHealth(db, 20), getTimeseries(db, req.query),
-        getAlerts(db), getMasters(db), getHeatmap(db, req.query)
-      ]);
-      return { overview, brands, staff, channels, health, timeseries, alerts, masters, heatmap };
-    });
+    const [overview,brands,staff,channels,health,timeseries,alerts,masters,heatmap]=await Promise.all([
+      appWithDb(db=>getOverview(db,req.query)),appWithDb(db=>getTopBrands(db,20,req.query)),
+      appWithDb(db=>getTopStaff(db,20,req.query)),appWithDb(db=>getTopChannels(db,20,req.query)),
+      appWithDb(db=>getHealth(db,20)),appWithDb(db=>getTimeseries(db,req.query)),
+      appWithDb(getAlerts),appWithDb(getMasters),appWithDb(db=>getHeatmap(db,req.query))
+    ]);
+    const data={overview,brands,staff,channels,health,timeseries,alerts,masters,heatmap};
     const elapsedMs = Date.now() - started;
     // Bounded diagnostics only: no query text, credentials, or payload data.
     if (elapsedMs > 2000) console.warn(`[dashboard] completed in ${elapsedMs}ms`);

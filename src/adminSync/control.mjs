@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { executeConfigPush } from '../configPush/runner.mjs';
 import { runDirectNvIngestion } from '../ingestion/directNvRunner.mjs';
 import { isDatabaseCatalogAuthority } from '../catalog/authority.mjs';
+import { refreshReportingReadModel } from '../reporting/readModel.mjs';
 
 export const ACTIONS = Object.freeze(['config_push', 'direct_nv_sync', 'report_refresh_reconcile', 'full_pipeline']);
 export const WEBHOOK_STATUS_ACTION = 'status';
@@ -54,14 +55,16 @@ async function appendLog(db, id, level, message, details = null) {
 }
 
 export async function reportRefreshReconcile(db) {
+  const readModel = await refreshReportingReadModel(db);
   const result = await db.query(`select
-    (select count(*)::int from posts_raw_sheet) posts,
+    (select count(*)::int from reporting_posts_current) posts,
+    (select count(*)::int from posts_raw_sheet) source_posts,
     (select count(*)::int from post_brands_sheet) post_brands,
     (select count(*)::int from nv_ingestion_sources where active) active_sources,
     (select count(*)::int from nv_ingestion_checkpoints c join sync_runs r on r.id=c.run_id
       where r.id=(select id from sync_runs where run_type='direct_nv_ingestion' order by started_at desc limit 1) and c.status='fail') failed_sources,
     (select max(finished_at) from sync_runs where run_type='direct_nv_ingestion' and status in ('ok','partial')) last_nv_sync_at`);
-  return { refreshed: 'live SQL report views require no materialized refresh', reconciledAt: new Date().toISOString(), ...result.rows[0] };
+  return { readModel, reconciledAt: new Date().toISOString(), ...result.rows[0] };
 }
 
 export function runCommand(command, args, { timeoutMs = 30 * 60 * 1000 } = {}) {

@@ -30,6 +30,8 @@
     "migrate:config-push": "node scripts/apply-migration.mjs migrations/009_config_push_audit.sql && node scripts/apply-migration.mjs migrations/011_dynamic_config_push_audit.sql",
     "migrate:admin-sync": "node scripts/apply-migration.mjs migrations/012_admin_sync_control.sql",
     "migrate:web-admin": "node scripts/apply-migration.mjs migrations/014_web_catalog_admin.sql",
+    "migrate:reporting-read-model": "node scripts/apply-migration.mjs migrations/015_canonical_reporting_read_model.sql",
+    "migrate:lock-public-db": "node scripts/apply-migration.mjs migrations/016_lock_public_database_roles.sql",
     "catalog:cutover": "node --env-file-if-exists=.env.local scripts/cutover-catalog-authority.mjs",
     "phase3:verify-staging": "node --env-file=.env.local scripts/phase3-verify-staging.mjs",
     "phase3:diff": "node --env-file=.env.local scripts/phase3-diff-staging-vs-production.mjs",
@@ -42,6 +44,7 @@
     "batch:check": "python3 -m automation.report_batch.runner_cli check",
     "batch:publish": "python3 -m automation.report_batch.runner_cli scheduled-run --production",
     "batch:test": "python3 -m unittest discover -s python_tests -v",
+    "verify:operations": "node --env-file-if-exists=.env.local scripts/verify-operational-read-model.mjs",
     "render:verify": "python3 scripts/verify_render_blueprint.py render.yaml"
   },
   "dependencies": {

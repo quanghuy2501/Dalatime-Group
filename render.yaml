@@ -41,6 +41,10 @@ services:
         value: database
       - key: CONFIG_PUSH_REQUESTS_PER_MINUTE
         value: "55"
+      - key: LOGIN_RATE_MAX_FAILURES
+        value: "10"
+      - key: LOGIN_RATE_WINDOW_MS
+        value: "900000"
 
   # Opt-in registry maintenance. It fails closed until an operator approves it
   # by setting REPORT_REGISTRY_PRODUCTION=1 after installing migration 013.

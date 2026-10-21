@@ -64,6 +64,8 @@ the serving path; the Python batch worker is dry-run and publish-disabled by def
 
 ## Production cron snapshot publication
 
+The live dashboard and every report use the same non-destructive canonical read model. See [`docs/operational-read-model.md`](docs/operational-read-model.md) for identity rules, source-row traceability, future-date handling, refresh, verification and rollback.
+
 The Render cron is deliberately dry-run by default. It creates no Google writes and does not publish. After parity is proven, explicitly set its command to:
 
 ```sh
