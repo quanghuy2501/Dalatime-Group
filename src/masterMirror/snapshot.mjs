@@ -28,19 +28,32 @@ export function googleSerial(value,{withTime=false}={}){
 
 export function sourceFileUrl(fileId){
   const id=clean(fileId);
-  return id?`https://docs.google.com/spreadsheets/d/${id}/edit`:'';
+  if(!id)return '';
+  if(/^https?:\/\//i.test(id))return id;
+  return `https://docs.google.com/spreadsheets/d/${id}/edit?usp=sharing`;
+}
+
+function sourceSheetDate(rawValue,normalizedValue){
+  if(typeof rawValue==='number'&&Number.isFinite(rawValue))return rawValue;
+  const raw=clean(rawValue);
+  if(raw&&Number.isFinite(Number(raw)))return Number(raw);
+  if(normalizedValue)return googleSerial(normalizedValue);
+  // Legacy Master rows with an intentionally unparsed date must remain visible
+  // exactly as entered instead of silently becoming a blank date.
+  return raw;
 }
 
 export function canonicalSheetRow(row,{legacyState}={}){
-  const source=pad(rawValues(row),22);
+  const raw=rawValues(row),source=pad(raw,22);
   const legacy=legacyState?.get(clean(row.post_url))||{};
+  const legacyMasterRow=raw.length>=26;
   return [
-    googleSerial(row.posted_date),clean(row.brand_text_raw),clean(row.channel_name),clean(row.post_url),clean(row.owner_name),
+    sourceSheetDate(raw[0],row.posted_date),clean(row.brand_text_raw),clean(row.channel_name),clean(row.post_url),clean(row.owner_name),
     row.is_exclusive?'Có':clean(source[5]),clean(row.viral_label),number(row.realtime_view),number(row.realtime_like),
     number(row.realtime_comment),number(row.realtime_save),number(row.realtime_share),number(row.snapshot_view),number(row.snapshot_like),
-    number(row.snapshot_comment),number(row.snapshot_save),number(row.snapshot_share),number(row.engagement_rate),clean(row.status),
-    number(row.bonus_amount),clean(row.show_channel),googleSerial(row.updated_at,{withTime:true}),sourceFileUrl(row.source_file_id),
-    legacy.lastMilestone??'',legacy.notifiedAt??'',googleSerial(row.viral_confirm_date)
+    number(row.snapshot_comment),number(row.snapshot_save),number(row.snapshot_share),number(row.engagement_rate),clean(row.status)||'Chưa cập nhật',
+    number(row.bonus_amount),clean(row.show_channel),legacyMasterRow&&raw[21]!==''?raw[21]:googleSerial(row.updated_at,{withTime:true}),sourceFileUrl(row.source_file_id),
+    legacy.lastMilestone??'',legacy.notifiedAt??'',sourceSheetDate(legacyMasterRow?raw[25]:raw[21],row.viral_confirm_date)
   ];
 }
 
@@ -84,4 +97,3 @@ export function buildCatalogSheets({clients,brands,staff,channels,bonus,links=ne
 }
 
 export function fingerprintManifest(value){return hash(value);}
-

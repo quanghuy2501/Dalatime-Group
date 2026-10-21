@@ -34,4 +34,6 @@ test('Google serial dates fail closed outside the supported business range', () 
   assert.equal(googleSerialToDate(46310), '2026-10-15');
   assert.equal(googleSerialToDate(6686421), null);
   assert.equal(parseDateAny(6686421), null);
+  assert.equal(parseDateAny('06/17/2026'),'2026-06-17');
+  assert.equal(parseDateAny('11/12/2026'),'2026-12-11');
 });

@@ -33,7 +33,8 @@ async function sourceSnapshot(db){
     db.query(`select scope,object_code,status,token_ciphertext,token_iv,token_tag from report_link_registry where status='active'`),
     db.query(`select
       (select coalesce(sum(source_row_count-1),0)::int from reporting_posts_canonical) duplicate_source_rows,
-      (select count(*)::int from reporting_posts_canonical where posted_date>current_date) future_rows,
+      (select count(*)::int from reporting_posts_canonical where posted_date_parse_ok and posted_date>current_date) future_rows,
+      (select count(*)::int from reporting_posts_canonical where not posted_date_parse_ok or posted_date is null) invalid_date_rows,
       (select count(*)::int from reporting_posts_current where cardinality(brand_names)=0) untagged_posts,
       (select count(distinct case when nullif(trim(post_url),'') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)),'\\?.*$',''),'/$','') end)::int from posts_raw_sheet) source_canonical_keys,
       (select count(*)::int from reporting_posts_canonical) canonical_rows,
@@ -200,7 +201,7 @@ export async function runMasterMirror({spreadsheetId,apply=false,db,api,log=()=>
     if(errors.length)throw new Error(`report formula errors: ${json(errors.slice(0,10))}`);
     await verifyCatalog(api,spreadsheetId,catalog);
     const statusRows=[['MASTER REPORTING MIRROR V2'],['STATUS','PUBLISHED'],['RUN_ID',runId],['SOURCE_WATERMARK',String(manifest.sourceWatermark||'')],['PUBLISHED_AT',new Date().toISOString()],['RAW_ROWS',manifest.rawRows],['NORMALIZED_ROWS',manifest.normalizedRows],['SNAPSHOT_HASH',manifest.snapshotHash],['RAW_HASH',manifest.rawHash],['NORMALIZED_HASH',manifest.normalizedHash]];
-    const qualityRows=[['DATA QUALITY'],['METRIC','VALUE'],['DUPLICATE SOURCE ROWS',Number(source.quality.duplicate_source_rows||0)],['FUTURE ROWS EXCLUDED',Number(source.quality.future_rows||0)],['UNTAGGED POSTS',Number(source.quality.untagged_posts||0)],['POLICY','Không fuzzy-map; dữ liệu mơ hồ giữ ở quality gate']];
+    const qualityRows=[['DATA QUALITY'],['METRIC','VALUE'],['DUPLICATE SOURCE ROWS',Number(source.quality.duplicate_source_rows||0)],['FUTURE ROWS EXCLUDED',Number(source.quality.future_rows||0)],['INVALID DATE ROWS EXCLUDED',Number(source.quality.invalid_date_rows||0)],['UNTAGGED POSTS',Number(source.quality.untagged_posts||0)],['POLICY','Không fuzzy-map; dữ liệu mơ hồ giữ ở quality gate']];
     await writeStatus(api,spreadsheetId,statusRows,qualityRows);
     await db.query(`update master_mirror_runs set status='published',finished_at=now(),duration_ms=$2,manifest=$3 where id=$1`,[runId,Date.now()-started,json({...manifest,formulaErrors:0})]);
     return {mode:'applied',runId,durationMs:Date.now()-started,manifest,formulaErrors:0};

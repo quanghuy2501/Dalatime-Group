@@ -10,7 +10,8 @@ try{
     (select count(distinct case when nullif(trim(post_url),'') is null then row_key else regexp_replace(regexp_replace(lower(trim(post_url)),'\\?.*$',''),'/$','') end)::int from posts_raw_sheet) source_canonical_keys,
     (select count(*)::int from reporting_posts_canonical) canonical_rows,
     (select count(*)::int from reporting_posts_current) current_rows,
-    (select count(*)::int from reporting_posts_canonical where posted_date>current_date) future_rows,
+    (select count(*)::int from reporting_posts_canonical where posted_date_parse_ok and posted_date>current_date) future_rows,
+    (select count(*)::int from reporting_posts_canonical where not posted_date_parse_ok or posted_date is null) invalid_date_rows,
     (select count(*)::int from reporting_posts_canonical where source_row_count<>cardinality(source_row_keys) or not(row_key=any(source_row_keys))) trace_errors`)).rows[0];
   const security=(await db.query(`select
     (select count(*)::int from information_schema.role_table_grants where table_schema='public' and grantee in ('anon','authenticated')) exposed_grants,
@@ -23,7 +24,7 @@ try{
   const reportDate=report?.date_to instanceof Date?report.date_to.toISOString().slice(0,10):String(report?.date_to||'').slice(0,10);
   const checks={
     canonical_key_parity:Number(counts.source_canonical_keys)===Number(counts.canonical_rows),
-    future_rows_excluded:Number(counts.current_rows)+Number(counts.future_rows)===Number(counts.canonical_rows),
+    excluded_rows_reconcile:Number(counts.current_rows)+Number(counts.future_rows)+Number(counts.invalid_date_rows)===Number(counts.canonical_rows),
     source_trace_complete:Number(counts.trace_errors)===0,
     overview_count_matches:Number(overview.posts)===Number(counts.current_rows),
     public_roles_locked:Number(security.exposed_grants)===0,

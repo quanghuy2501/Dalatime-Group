@@ -33,6 +33,7 @@
     "migrate:reporting-read-model": "node scripts/apply-migration.mjs migrations/015_canonical_reporting_read_model.sql",
     "migrate:lock-public-db": "node scripts/apply-migration.mjs migrations/016_lock_public_database_roles.sql",
     "migrate:master-mirror": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/017_master_report_mirror.sql",
+    "migrate:repair-reporting-dates": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/018_repair_reporting_dates.sql",
     "master-mirror:dry-run": "node --env-file-if-exists=.env.local scripts/master-report-mirror.mjs",
     "master-mirror:apply": "node --env-file-if-exists=.env.local scripts/master-report-mirror.mjs --apply",
     "catalog:cutover": "node --env-file-if-exists=.env.local scripts/cutover-catalog-authority.mjs",

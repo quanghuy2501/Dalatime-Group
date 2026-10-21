@@ -4,14 +4,22 @@ import fs from 'node:fs';
 import { refreshReportingReadModel } from '../src/reporting/readModel.mjs';
 
 const migration=fs.readFileSync(new URL('../migrations/015_canonical_reporting_read_model.sql',import.meta.url),'utf8');
+const dateRepair=fs.readFileSync(new URL('../migrations/018_repair_reporting_dates.sql',import.meta.url),'utf8');
 const security=fs.readFileSync(new URL('../migrations/016_lock_public_database_roles.sql',import.meta.url),'utf8');
 
-test('canonical reporting migration is additive, traceable and excludes future dates only in the read view',()=>{
+test('canonical reporting migration is additive, traceable and excludes future dates from the read view',()=>{
   assert.match(migration,/create materialized view reporting_posts_canonical/i);
   assert.match(migration,/source_row_keys/);
   assert.match(migration,/array_agg\(brand_name order by brand_key\)/);
   assert.match(migration,/posted_date is null or posted_date <= current_date/i);
   assert.doesNotMatch(migration,/\b(update|delete from|truncate)\s+(posts_raw_sheet|post_brands_sheet)\b/i);
+});
+
+test('date repair only fixes unambiguous legacy dates and quality-gates invalid dates',()=>{
+  assert.match(dateRepair,/raw_posted_date ~ '\^\\d\{1,2\}\/\\d\{1,2\}\/\\d\{4\}\$'/i);
+  assert.match(dateRepair,/split_part\(raw_posted_date,'\/',2\)::integer between 13 and 31/i);
+  assert.match(dateRepair,/where posted_date_parse_ok[\s\S]*posted_date is not null[\s\S]*posted_date <= current_date/i);
+  assert.doesNotMatch(dateRepair,/\b(delete from|truncate table)\s+(posts_raw_sheet|post_brands_sheet)\b/i);
 });
 
 test('public database lock revokes Supabase API roles and enables RLS without business-row writes',()=>{
@@ -26,12 +34,13 @@ test('read-model refresh is singleton, concurrent and returns parity metadata',a
   const db={query:async(sql)=>{
     calls.push(sql);
     if(sql.includes('pg_try_advisory_lock'))return {rows:[{locked:true}]};
-    if(sql.includes('source_rows'))return {rows:[{source_rows:10,canonical_rows:7,future_rows:1,duplicate_source_rows:3}]};
+    if(sql.includes('source_rows'))return {rows:[{source_rows:10,canonical_rows:7,future_rows:1,invalid_date_rows:1,duplicate_source_rows:3}]};
     return {rows:[{}]};
   }};
   const result=await refreshReportingReadModel(db);
   assert.equal(result.refreshed,true);
   assert.equal(result.canonical_rows,7);
+  assert.equal(result.invalid_date_rows,1);
   assert.ok(calls.some(sql=>sql.includes('refresh materialized view concurrently reporting_posts_canonical')));
   assert.ok(calls.some(sql=>sql.includes('pg_advisory_unlock')));
 });

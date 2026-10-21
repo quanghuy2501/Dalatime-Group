@@ -56,7 +56,13 @@ export function parseDateAny(v) {
   if (!s) return null;
   if (/^\d+(\.\d+)?$/.test(s)) return googleSerialToDate(Number(s));
   let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return validYmd(m[3], m[2], m[1]);
+  if (m) {
+    const dayFirst=validYmd(m[3],m[2],m[1]);
+    if(dayFirst)return dayFirst;
+    // If DD/MM is impossible (for example 06/17/2026), the value is an
+    // unambiguous MM/DD date. Do not guess when both interpretations are valid.
+    return validYmd(m[3],m[1],m[2]);
+  }
   // Common typo from Sheets/manual input: 27/072026 or 6/72026 => dd/mm/yyyy when valid.
   m = s.match(/^(\d{1,2})\/(\d{1,2})(\d{4})$/);
   if (m) return validYmd(m[3], m[2], m[1]);
