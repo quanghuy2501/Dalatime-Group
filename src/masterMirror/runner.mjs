@@ -183,8 +183,9 @@ export async function runMasterMirror({spreadsheetId,apply=false,db,api,log=()=>
     if(Number(source.quality.source_canonical_keys)!==Number(source.quality.canonical_rows))throw new Error('reporting read model is stale after refresh');
     const links=mergeRegistryLinks(existing.links,source.registry),facts=buildFactSheets(source.posts,{legacyState:existing.legacyState});
     const catalog=buildCatalogSheets({...source,links});
-    const manifest={spreadsheetId,sourceWatermark:source.quality.watermark,readModelRefreshMs:readModelRefresh.durationMs,rawRows:facts.rawDataRows,normalizedRows:facts.normalizedDataRows,rawHash:facts.rawHash,normalizedHash:facts.normalizedHash,catalog:{clients:catalog.clientRows.length,brands:catalog.brandRows.length,staff:catalog.staffRows.length,channels:catalog.channelRows.length,bonus:catalog.bonusRows.length},quality:source.quality};
+    const manifest={spreadsheetId,sourceWatermark:source.quality.watermark,rawRows:facts.rawDataRows,normalizedRows:facts.normalizedDataRows,rawHash:facts.rawHash,normalizedHash:facts.normalizedHash,catalog:{clients:catalog.clientRows.length,brands:catalog.brandRows.length,staff:catalog.staffRows.length,channels:catalog.channelRows.length,bonus:catalog.bonusRows.length},quality:source.quality};
     manifest.snapshotHash=fingerprintManifest(manifest);
+    manifest.readModelRefreshMs=readModelRefresh.durationMs;
     if(!apply)return {mode:'dry-run',durationMs:Date.now()-started,manifest};
     runId=(await db.query(`insert into master_mirror_runs(spreadsheet_id,status,source_watermark,raw_rows,normalized_rows,snapshot_hash,manifest) values($1,'running',$2,$3,$4,$5,$6) returning id`,[spreadsheetId,manifest.sourceWatermark,manifest.rawRows,manifest.normalizedRows,manifest.snapshotHash,json(manifest)])).rows[0].id;
     log({stage:'staging',runId});await stageFacts(api,spreadsheetId,tabMap,facts);
