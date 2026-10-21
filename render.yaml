@@ -112,6 +112,31 @@ services:
       - key: GOOGLE_REQUESTS_PER_MINUTE
         value: "55"
 
+  # Publish the DB-authoritative catalog and canonical employee facts back to
+  # the isolated Master reporting copy after ingestion and report-key repair.
+  - type: cron
+    name: Dalatime-Group-master-report-mirror
+    runtime: node
+    region: singapore
+    schedule: "10,40 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run master-mirror:apply
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: REPORT_REGISTRY_ENCRYPTION_KEY
+        sync: false
+      - key: MASTER_SPREADSHEET_ID
+        value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: MASTER_MIRROR_SPREADSHEET_ID
+        value: 1F1-F0rtBxgWmcBQmnbrGYBG4lxG_gzpV0lcWwq3COw0
+      - key: MASTER_MIRROR_PRODUCTION
+        value: "1"
+
   - type: cron
     name: Dalatime-Group-config-push-dry-run
     runtime: node

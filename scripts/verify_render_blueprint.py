@@ -34,6 +34,7 @@ def verify(blueprint: dict) -> None:
     nv_ingestion = next((service for service in automations if "direct-nv-ingestion" in str(service.get("name", ""))), None)
     report_registry = next((service for service in automations if "report-link-registry" in str(service.get("name", ""))), None)
     config_push = next((service for service in automations if "config-push" in str(service.get("name", ""))), None)
+    master_mirror = next((service for service in automations if "master-report-mirror" in str(service.get("name", ""))), None)
     if not web or web.get("healthCheckPath") != "/healthz":
         raise ValueError("web service must preserve /healthz")
     if not automation:
@@ -87,6 +88,20 @@ def verify(blueprint: dict) -> None:
         raise ValueError("config push cron must remain dry-run by default")
     if str(push_env.get("CATALOG_AUTHORITY", {}).get("value")) != "database":
         raise ValueError("config push source authority must be database")
+    if not master_mirror or master_mirror.get("type") != "cron":
+        raise ValueError("Master reporting mirror cron is required")
+    if str(master_mirror.get("schedule", "")) != "10,40 * * * *":
+        raise ValueError("Master mirror must run after NV ingestion and report-key repair")
+    if str(master_mirror.get("startCommand", "")) != "npm run master-mirror:apply":
+        raise ValueError("Master mirror must use the guarded typed exporter")
+    mirror_env = {item.get("key"): item for item in master_mirror.get("envVars", [])}
+    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "REPORT_REGISTRY_ENCRYPTION_KEY", "MASTER_SPREADSHEET_ID", "MASTER_MIRROR_SPREADSHEET_ID", "MASTER_MIRROR_PRODUCTION"):
+        if key not in mirror_env:
+            raise ValueError(f"Master mirror env is missing {key}")
+    if str(mirror_env["MASTER_MIRROR_PRODUCTION"].get("value")) != "1":
+        raise ValueError("Master mirror production gate must be explicit")
+    if mirror_env["MASTER_MIRROR_SPREADSHEET_ID"].get("value") == mirror_env["MASTER_SPREADSHEET_ID"].get("value"):
+        raise ValueError("Master mirror target must not be the legacy Master")
     web_env = {item.get("key"): item for item in web.get("envVars", [])}
     if str(web_env.get("CATALOG_AUTHORITY", {}).get("value")) != "database":
         raise ValueError("web catalog authority must be database")
