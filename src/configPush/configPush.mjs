@@ -5,6 +5,7 @@ import { isRegisteredSourceActive } from '../staffStatus.mjs';
 const clean = value => String(value ?? '').trim();
 const fold = value => clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase().replace(/[\s_]+/g, ' ');
 const hashJson = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const canonicalMatrix = (rows,width) => (rows || []).map(row => Array.from({length:width},(_,index)=>clean(row?.[index])));
 
 export const CONFIG_SECTIONS = Object.freeze([
   Object.freeze({ key:'brand', sourceSheet:'4. LIST BRAND', sourceColumns:'A:I', sourceHeaders:['ID BRAND','TÊN THƯƠNG HIỆU','NHÓM KHÁCH HÀNG','KHÁCH HÀNG','MÃ KH','THỜI GIAN BẮT ĐẦU','THỜI GIAN KẾT THÚC','TRẠNG THÁI','LINK REPORT'], sourceDataRow:5, project:[0,1,2,3,4,5,6,7], targetColumns:'A:H', targetDataRow:3 }),
@@ -72,7 +73,11 @@ async function mapLimit(items,limit,fn){const results=new Array(items.length);le
 export function diffTargetSection(section, currentValues = []) {
   let oldLast=-1; for(let index=0;index<currentValues.length;index++)if(populated(currentValues[index]))oldLast=index;
   const oldRows=oldLast < 0 ? [] : currentValues.slice(0,oldLast+1);
-  return { matches:hashJson(oldRows)===hashJson(section.rows), oldRowCount:oldRows.length, newRowCount:section.rows.length };
+  // Sheets can return a numeric cell as Number while PostgreSQL returns the
+  // same displayed value as String. Compare CONFIG by trimmed display value so
+  // a source-of-truth cutover never rewrites semantically identical cells.
+  const width=Math.max(0,...section.rows.map(row=>row.length),...oldRows.map(row=>row.length));
+  return { matches:hashJson(canonicalMatrix(oldRows,width))===hashJson(canonicalMatrix(section.rows,width)), oldRowCount:oldRows.length, newRowCount:section.rows.length };
 }
 
 export async function pushTarget({api,source,snapshot,production=false,timeoutMs=120000,checkpoint=null,saveCheckpoint=async()=>{}}) {

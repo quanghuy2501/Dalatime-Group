@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GoogleApi } from '../src/google/googleApi.mjs';
-import { CONFIG_SECTIONS, assertAllowedRange, clearAllowedValues, discoverSection, isPushSourceActive, pushTarget, runConfigPush, writeAllowedValues } from '../src/configPush/configPush.mjs';
+import { CONFIG_SECTIONS, assertAllowedRange, clearAllowedValues, diffTargetSection, discoverSection, isPushSourceActive, pushTarget, runConfigPush, writeAllowedValues } from '../src/configPush/configPush.mjs';
 
 const section=(key,rows)=>({...CONFIG_SECTIONS.find(x=>x.key===key),rows,hash:'x'});
 const snapshot={sections:[section('brand',[['B1','one','','','','','','active']]),section('channel',[['C1','channel','','','owner']]),section('staff',[['NV01','Name','','','','','']]),section('bonus',[[5000,1,2]])],hash:'a'.repeat(64),version:'sha256:test'};
@@ -37,6 +37,10 @@ test('production writes expanded data and clears only stale allowlisted tail',as
 test('matching target sections hash-skip with no writes',async()=>{
   const values={'file-01':Object.fromEntries(snapshot.sections.map(s=>[`'CONFIG'!${s.targetColumns.split(':')[0]}3:${s.targetColumns.split(':')[1]}`,s.rows]))};
   const api=apiFor(values);const result=await pushTarget({api,source:source('01'),snapshot,production:true});assert.equal(result.status,'hash_skip');assert.equal(api.calls.length,0);
+});
+test('CONFIG diff treats equivalent Sheet numbers and database strings as unchanged',()=>{
+  assert.equal(diffTargetSection({rows:[[1,'  NV01 ',1000000]]},[['1','NV01','1000000']]).matches,true);
+  assert.equal(diffTargetSection({rows:[['NV01','Name','','']]},[['NV01','Name']]).matches,true);
 });
 test('queue caps concurrency at two and isolates a target failure',async()=>{
   let active=0,max=0;const api={values:async(id)=>{active++;max=Math.max(max,active);await new Promise(r=>setTimeout(r,5));active--;if(id==='file-02')throw new Error('isolated');return {values:[]};}};

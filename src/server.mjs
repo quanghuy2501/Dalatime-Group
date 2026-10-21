@@ -10,6 +10,7 @@ import { createReportApiRouter, createReportRouter } from './report/routes.mjs';
 import { decryptReportToken, registryKey } from './report/registry.mjs';
 import { createJobWorker, enqueueJob, isAllowedWebhookAction, retryJob, syncStatus, WEBHOOK_STATUS_ACTION, webhookStatus } from './adminSync/control.mjs';
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
+import { catalogSummary, catalogSuggestions, createCatalogRow, getStaffReport, listCatalog, listCatalogAudit, updateCatalogRow } from './admin/catalog.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
@@ -35,7 +36,7 @@ app.get('/healthz', (req, res) => res.json({
   ok: true,
   service: 'onicorn-dashboard-system',
   readiness: 'process-live',
-  features: { masterCatalogSync: true, boundedSheetDates: true }
+  features: { masterCatalogSync: true, webCatalogAdmin: true, databaseCatalogAuthority: process.env.CATALOG_AUTHORITY === 'database', boundedSheetDates: true }
 }));
 app.get('/readyz', asyncRoute(async (req, res) => {
   if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });
@@ -136,6 +137,39 @@ app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
     }),
     operations: { import: 'npm run portal:import-config -- --apply <config>', importLegacy: 'npm run portal:import-legacy-links -- --apply <export>', ensure: 'npm run portal:ensure-active -- --apply' }
   });
+}));
+const queueCatalogPropagation = async (db, entity, row) => {
+  if (process.env.CATALOG_AUTHORITY !== 'database') return { state: 'not-cut-over', message: 'Web đã lưu; CONFIG vẫn đang lấy từ Master trong giai đoạn chuyển đổi.' };
+  try {
+    const result = await enqueueJob(db, {
+      action: 'config_push',
+      idempotencyKey: `catalog:${entity}:${row.id}:${row.change_version}`,
+      requestedBy: 'dashboard-catalog'
+    });
+    jobWorker.kick();
+    return { state: result.duplicate ? 'already-queued' : 'queued', jobId: result.job?.id || null };
+  } catch (error) {
+    return { state: 'attention', message: error.message, code: error.code || null };
+  }
+};
+app.get('/api/admin/catalog/summary', asyncRoute(async (_req,res)=>res.json(await appWithDb(catalogSummary))));
+app.get('/api/admin/catalog/suggestions', asyncRoute(async (_req,res)=>res.json(await appWithDb(catalogSuggestions))));
+app.get('/api/admin/catalog/audit', asyncRoute(async (req,res)=>res.json({rows:await appWithDb(db=>listCatalogAudit(db,req.query))})));
+app.get('/api/admin/reports/staff/:id', asyncRoute(async (req,res)=>res.json(await appWithDb(db=>getStaffReport(db,req.params.id,req.query)))));
+app.get('/api/admin/catalog/:entity', asyncRoute(async (req,res)=>res.json(await appWithDb(db=>listCatalog(db,req.params.entity,req.query)))));
+app.post('/api/admin/catalog/:entity', asyncRoute(async (req,res)=>{
+  const result=await appWithDb(async db=>{
+    const saved=await createCatalogRow(db,req.params.entity,req.body,'dashboard-session');
+    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row)};
+  });
+  res.status(201).json({ok:true,...result});
+}));
+app.patch('/api/admin/catalog/:entity/:id', asyncRoute(async (req,res)=>{
+  const result=await appWithDb(async db=>{
+    const saved=await updateCatalogRow(db,req.params.entity,req.params.id,req.body,'dashboard-session');
+    return {...saved,propagation:await queueCatalogPropagation(db,req.params.entity,saved.row)};
+  });
+  res.json({ok:true,...result});
 }));
 app.get('/api/admin/sync/status', asyncRoute(async (req, res) => {
   try {

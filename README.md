@@ -18,13 +18,15 @@ npm run check
 
 No command in this folder writes to Google Drive/Sheets unless explicitly implemented under `src/exporters` and run with a write flag.
 
-## Master CONFIG push
+## Database catalog and CONFIG push
 
-`npm run config-push:dry-run` audits the Master `CONFIG` snapshot against every active employee source. Source seeding reads Master `2. NHAN SU` through the read-only Google API: `TÌNH TRẠNG` is authoritative, `Đang làm` and blank are active, and `Đã nghỉ`/`inactive`/`disabled`/`retired`/`archived`/`offboarded` are inactive. Employee files absent from Master are logged and skipped. Discovery performs no Google writes; config-push dry-run performs no Google writes.
+Production uses PostgreSQL as the catalog authority. Authenticated admins edit customers, brands, staff, and channels in the dashboard; each change is validated, version-checked, and appended to `admin_catalog_audit`. No catalog DELETE route exists. A save queues a CONFIG push, and customer/brand report keys are activated in the same database transaction.
 
-Production is deliberately gated: run `npm run migrate:config-push` once, then `npm run config-push:production` with `NODE_ENV=production`, `CONFIG_PUSH_PRODUCTION=1`, and exactly 2–3 approved IDs in `CONFIG_PUSH_PILOT_NV_IDS`. A later full run additionally requires `CONFIG_PUSH_FULL_ROLLOUT=1`. It uses at most two workers and 55 requests/minute, isolates file failures, and resumes from database checkpoints. The only permitted target ranges are `'CONFIG'!A1:H20` and the version/hash marker `'CONFIG'!X1:Y2`; the worker never creates, clears, resizes, or writes any other sheet.
+`npm run config-push:dry-run` audits the database CONFIG snapshot against every active employee source. Source seeding uses CONFIG-visible database staff when `CATALOG_AUTHORITY=database`. Employee files absent from the registry are logged and skipped. Discovery and dry-run perform no Google writes.
 
-Production employee data is ingested directly and read-only from the active NV files with `npm run sync:nv`; see [docs/direct-nv-ingestion.md](docs/direct-nv-ingestion.md). This stages and atomically publishes to the existing exact mirror while preserving the existing Master sync as registry/configuration only. There is no manual snapshot publication path for NV ingestion.
+Production is deliberately gated: run `npm run migrate:config-push` once, then `npm run config-push:production` with `NODE_ENV=production`, `CONFIG_PUSH_PRODUCTION=1`, and exactly 2–3 approved IDs in `CONFIG_PUSH_PILOT_NV_IDS`. A later full run additionally requires `CONFIG_PUSH_FULL_ROLLOUT=1`. It uses at most two workers and 55 requests/minute, isolates file failures, and resumes from database checkpoints. Writes are restricted to the four audited CONFIG data blocks and version/hash marker; the worker never creates, resizes, or writes any other sheet.
+
+Production employee data is ingested directly and read-only from the active NV files with `npm run sync:nv`; see [docs/direct-nv-ingestion.md](docs/direct-nv-ingestion.md). This stages and atomically publishes to the existing exact mirror. Master remains a transition/rollback source, not the production editing authority. See [docs/web-catalog-admin.md](docs/web-catalog-admin.md) for the cutover, validation, and rollback contract.
 
 ## Safe read-only sync
 

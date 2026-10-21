@@ -34,7 +34,13 @@ services:
       - key: ADMIN_SYNC_WEBHOOK_SECRET
         sync: false
       - key: CONFIG_PUSH_PRODUCTION
-        value: "0"
+        value: "1"
+      - key: CONFIG_PUSH_FULL_ROLLOUT
+        value: "1"
+      - key: CATALOG_AUTHORITY
+        value: database
+      - key: CONFIG_PUSH_REQUESTS_PER_MINUTE
+        value: "55"
 
   # Opt-in registry maintenance. It fails closed until an operator approves it
   # by setting REPORT_REGISTRY_PRODUCTION=1 after installing migration 013.
@@ -46,9 +52,8 @@ services:
     name: Dalatime-Group-report-link-registry
     runtime: node
     region: singapore
-    # Catalog sync starts every 30 minutes at :00/:30. Activate report links
-    # five minutes later so newly added customers/brands are report-ready in
-    # the same sync window without duplicating registry secrets on another job.
+    # Repair/reconcile registry twice per hour. Web-admin creates the key in the
+    # same transaction; this cron is a fail-safe for legacy/imported rows.
     schedule: "5,35 * * * *"
     buildCommand: npm ci
     startCommand: npm run portal:ensure-active -- --apply
@@ -72,7 +77,7 @@ services:
     # Schema migrations are deploy-time operations. Do not run CREATE/ALTER inside
     # the recurring cron: the production pooler may expose a read-only transaction
     # and one migration failure would prevent every sync from starting.
-    startCommand: npm run sync:catalog && npm run seed:nv-sources && npm run sync:nv
+    startCommand: npm run seed:nv-sources && npm run sync:nv
     envVars:
       - key: NODE_ENV
         value: production
@@ -82,6 +87,10 @@ services:
         sync: false
       - key: MASTER_SPREADSHEET_ID
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
+      - key: EMPLOYEE_FOLDER_ID
+        value: 1sIMJ0TTPEC_hu6OBuW8hSHRLbb0Ajcr8
+      - key: CATALOG_AUTHORITY
+        value: database
       - key: NV_CONCURRENCY
         value: "3"
       - key: NV_PAGE_ROWS
@@ -117,6 +126,8 @@ services:
         value: 1NS7w8J44x09eD1n5WmaCF6UlZDm8sLYThMf_Nhha4p0
       - key: CONFIG_PUSH_PRODUCTION
         value: "0"
+      - key: CATALOG_AUTHORITY
+        value: database
       - key: CONFIG_PUSH_CONCURRENCY
         value: "2"
       - key: CONFIG_PUSH_REQUESTS_PER_MINUTE

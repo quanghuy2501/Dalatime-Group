@@ -29,17 +29,22 @@ async function readSheetObjects(api, title, rangeRows = 6000) {
   const rows = res.values || [];
   return rowsAsObjects(rows, ['NGÀY ĐĂNG BÀI','TÊN THƯƠNG HIỆU','VIEW','ID','MÃ KH','TIMESTAMP','Tên cấu hình']);
 }
-export async function loadLiveMasterSnapshot() {
+export async function loadLiveMasterCatalogSnapshot() {
   const api = await new GoogleApi({ minDelayMs: 1300, maxRetries: 6 }).init();
   // Read sequentially. Google Sheets API has a low per-user read/minute quota for service accounts.
   const clients = await readSheetObjects(api, '1. KHACH HANG', 1200);
   const staff = await readSheetObjects(api, '2. NHAN SU', 1200);
   const channels = await readSheetObjects(api, '3. CHANNEL', 1200);
   const brands = await readSheetObjects(api, '4. LIST BRAND', 1200);
+  return { api, serviceAccountEmail: api.serviceAccountEmail, clients, staff, channels, brands };
+}
+export async function loadLiveMasterSnapshot() {
+  const catalog = await loadLiveMasterCatalogSnapshot();
+  const { api } = catalog;
   const rawRows = await readSheetObjects(api, 'RAW_DATA', 6000);
   const normalizedRows = await readSheetObjects(api, 'NORMALIZED', 6000);
   const configRows = await readSheetObjects(api, 'CONFIG', 200);
-  return { api, serviceAccountEmail: api.serviceAccountEmail, clients, staff, channels, brands, rawRows, normalizedRows, configRows };
+  return { ...catalog, rawRows, normalizedRows, configRows };
 }
 export function mapClient(o) {
   return { client_code: String(o['MÃ KH'] ?? '').trim() || null, name: String(o['TÊN THƯƠNG HIỆU/ CÔNG TY'] ?? '').trim(), status: String(o['TRẠNG THÁI'] ?? '').trim(), contact_name: String(o['NGƯỜI ĐẠI DIỆN LIÊN HỆ'] ?? '').trim(), report_file_id: String(o['LINK REPORT'] ?? '').trim() || null, raw_row: o.__values, active: true };

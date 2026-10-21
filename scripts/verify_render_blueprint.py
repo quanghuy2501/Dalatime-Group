@@ -51,12 +51,14 @@ def verify(blueprint: dict) -> None:
         raise ValueError("persistent worker requires durable state disk")
     if not nv_ingestion or nv_ingestion.get("type") != "cron":
         raise ValueError("direct NV ingestion cron is required")
-    if str(nv_ingestion.get("startCommand", "")) != "npm run sync:catalog && npm run seed:nv-sources && npm run sync:nv":
-        raise ValueError("direct NV cron must sync catalog, seed sources, and run sync:nv without deploy-time migrations")
+    if str(nv_ingestion.get("startCommand", "")) != "npm run seed:nv-sources && npm run sync:nv":
+        raise ValueError("direct NV cron must seed DB-authoritative sources and run sync:nv without Master catalog writes")
     nv_env = {item.get("key"): item for item in nv_ingestion.get("envVars", [])}
-    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "MASTER_SPREADSHEET_ID"):
+    for key in ("DATABASE_URL", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "EMPLOYEE_FOLDER_ID", "CATALOG_AUTHORITY"):
         if key not in nv_env:
             raise ValueError(f"direct NV env is missing {key}")
+    if str(nv_env["CATALOG_AUTHORITY"].get("value")) != "database":
+        raise ValueError("direct NV registry authority must be database")
     for key in ("NV_PAGE_TIMEOUT_MS", "NV_SOURCE_TIMEOUT_MS", "NV_TOTAL_TIMEOUT_MS", "NV_HEARTBEAT_MS", "NV_SOURCE_RETRIES", "GOOGLE_REQUESTS_PER_MINUTE"):
         if key not in nv_env:
             raise ValueError(f"direct NV runtime env is missing {key}")
@@ -83,6 +85,13 @@ def verify(blueprint: dict) -> None:
         raise ValueError("config push env is missing GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if str(push_env.get("CONFIG_PUSH_PRODUCTION", {}).get("value")) != "0":
         raise ValueError("config push cron must remain dry-run by default")
+    if str(push_env.get("CATALOG_AUTHORITY", {}).get("value")) != "database":
+        raise ValueError("config push source authority must be database")
+    web_env = {item.get("key"): item for item in web.get("envVars", [])}
+    if str(web_env.get("CATALOG_AUTHORITY", {}).get("value")) != "database":
+        raise ValueError("web catalog authority must be database")
+    if str(web_env.get("CONFIG_PUSH_PRODUCTION", {}).get("value")) != "1" or str(web_env.get("CONFIG_PUSH_FULL_ROLLOUT", {}).get("value")) != "1":
+        raise ValueError("web catalog saves must be allowed to queue the audited full CONFIG push")
 
 
 def main() -> int:

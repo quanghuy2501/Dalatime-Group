@@ -1,4 +1,4 @@
-// Onicorn Admin Dashboard — reads existing /api/* endpoints only. No Google/DB writes happen here.
+// Onicorn Admin Dashboard. Catalog writes are explicit, validated and audited by the API.
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toLocaleString('vi-VN');
 const pct = n => { const x = Number(n || 0); return ((Math.abs(x) > 1 ? x / 100 : x) * 100).toFixed(2) + '%'; };
@@ -13,7 +13,7 @@ const dateFlag = s => isFuture(s) ? ' <span class="pill warn" title="Ngày đăn
 // Render may cold-start the service and establish a DB connection on the first request.
 // Keep the real error visible while allowing that bounded startup window.
 const REQUEST_TIMEOUT = 30000;
-const TAB_LABELS = { overview: '🏠 Tổng quan', sync: '🔄 Đồng bộ', alerts: '🚨 Cần xử lý', brand: '🏷️ Thương hiệu', staff: '👥 Nhân sự', channel: '📡 Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Khách hàng', brandReports: '🔗 Report theo Brand' };
+const TAB_LABELS = { overview: '🏠 Tổng quan', manage: '⚙️ Quản lý', sync: '🔄 Đồng bộ', alerts: '🚨 Cần xử lý', brand: '🏷️ Hiệu suất Brand', staff: '👥 Hiệu suất NV', channel: '📡 Hiệu suất Kênh', posts: '📝 Bài đăng', health: '🩺 Dữ liệu', links: '🏢 Report KH', brandReports: '🔗 Report Brand' };
 const RANGE_PRESETS = [['7d', '7 ngày'], ['14d', '14 ngày'], ['30d', '30 ngày'], ['90d', '90 ngày'], ['all', 'Tất cả']];
 
 let tab = (location.hash || '').replace('#', '');
@@ -24,6 +24,7 @@ let hadData = false;   // true once we've successfully loaded at least once
 let posts = null;
 let postFilter = { q: '', brand: '', channel: '', staff: '', sort: 'view', dir: 'desc', limit: 50, offset: 0 };
 let heatmapState = { key: '', status: 'idle', rows: [], error: '' };
+let management = { loaded: false, entity: 'clients', query: '', data: {}, summary: {}, suggestions: {}, audit: [], links: { clients: [], brands: [] } };
 
 function qs(extra = {}) {
   const p = new URLSearchParams();
@@ -48,12 +49,13 @@ async function api(path, extra = {}) {
   }
 }
 
-async function apiPost(path, body = {}) {
-  const r = await fetch(path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function apiWrite(method, path, body = {}) {
+  const r = await fetch(path, { method, cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const payload = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(payload.error || `HTTP ${r.status}`);
   return payload;
 }
+const apiPost = (path, body = {}) => apiWrite('POST', path, body);
 
 let toastTimer = null;
 function toast(msg, kind = '') {
@@ -376,6 +378,138 @@ function health() {
   return html;
 }
 
+// ---- Web catalog administration ----
+const MANAGEMENT_LABELS = { clients: 'Khách hàng', brands: 'Brand', staff: 'Nhân sự', channels: 'Kênh' };
+const MANAGEMENT_FORMS = {
+  clients: [
+    ['name','Tên khách hàng','text',true],['phone','Số điện thoại','tel'],['email','Email','email'],['tax_id','Mã số thuế','text'],
+    ['address','Địa chỉ','textarea'],['contact_name','Người liên hệ','text'],['status','Trạng thái','text'],
+    ['invoice_required','Xuất hóa đơn','checkbox'],['active','Đang hoạt động','checkbox']
+  ],
+  brands: [
+    ['name','Tên brand','text',true],['client_code','Khách hàng','clients',true],['group_name','Nhóm khách hàng','text'],
+    ['start_date','Ngày bắt đầu (YYYY-MM-DD)','text'],['end_date','Ngày kết thúc (YYYY-MM-DD)','text'],['status','Trạng thái','text'],['active','Đang hoạt động','checkbox']
+  ],
+  staff: [
+    ['name','Tên nhân sự','text',true],['role','Vị trí','text'],['phone','Số điện thoại','tel'],['email','Email','email'],
+    ['base_salary','Mức lương','number'],['employment_type','Fulltime / Parttime','text'],['status','Tình trạng','text'],
+    ['report_file_id','Link report hiện hữu','text'],['active','Đang làm việc','checkbox']
+  ],
+  channels: [
+    ['name','Tên kênh','text',true],['username','Username','text'],['url','Link kênh','url'],['owner_staff_id','Người phụ trách','staff'],
+    ['follower','Follower','number'],['active','Đang hoạt động','checkbox']
+  ]
+};
+
+async function loadManagement(force = false) {
+  if (management.loaded && !force) return;
+  const entities = Object.keys(MANAGEMENT_LABELS);
+  const [summary, suggestions, audit, linksPayload, ...catalogs] = await Promise.all([
+    api('/api/admin/catalog/summary'), api('/api/admin/catalog/suggestions'), api('/api/admin/catalog/audit', { limit: 50 }),
+    api('/api/admin/report-links'), ...entities.map(entity => api(`/api/admin/catalog/${entity}`, { limit: 1000 }))
+  ]);
+  management.summary = summary; management.suggestions = suggestions.codes || {}; management.audit = audit.rows || [];
+  management.links = linksPayload; management.data = Object.fromEntries(entities.map((entity,index)=>[entity,catalogs[index].rows || []]));
+  management.loaded = true;
+}
+
+const manageStatePill = row => `<span class="pill ${row.active ? '' : 'neutral'}">${row.active ? 'Đang hoạt động' : 'Đã ngưng'}</span>`;
+const manageLink = (scope, code) => {
+  const rows = scope === 'clients' ? management.links.clients : management.links.brands;
+  return (rows || []).find(row => (row.client_code || row.brand_code) === code);
+};
+const manageActions = (entity,row) => {
+  const report = entity === 'clients' || entity === 'brands' ? manageLink(entity,row.code) : null;
+  const reportButton = report?.reportPath ? `<a class="button small" href="${esc(report.reportPath)}" target="_blank" rel="noopener">Report ↗</a>`
+    : entity === 'staff' ? `<button class="button small" data-staff-report="${esc(row.id)}">Báo cáo</button>`
+    : entity === 'channels' ? `<button class="button small" data-channel-report="${esc(row.name)}">Bài đăng</button>` : '';
+  return `<div class="row-actions"><button class="button small" data-catalog-edit="${esc(row.id)}">Sửa</button>${reportButton}</div>`;
+};
+
+function managementColumns(entity) {
+  const action = [row => manageActions(entity,row),'Thao tác'];
+  if (entity === 'clients') return [['code','Mã KH'],['name','Khách hàng'],['phone','Điện thoại'],['contact_name','Liên hệ'],[row=>fmt(row.related_count),'Brand'],[manageStatePill,'Trạng thái'],action];
+  if (entity === 'brands') return [['code','Mã brand'],['name','Brand'],['client_name','Khách hàng'],['group_name','Nhóm'],['status','Tình trạng'],[manageStatePill,'Hoạt động'],action];
+  if (entity === 'staff') return [['code','Mã NV'],['name','Nhân sự'],['role','Vị trí'],[row=>fmt(row.related_count),'Kênh'],['source_status','Nguồn Sheet'],[manageStatePill,'Tình trạng'],action];
+  return [['code','Mã kênh'],['name','Kênh'],['username','Username'],['owner_name','Phụ trách'],[row=>fmt(row.follower),'Follower'],[manageStatePill,'Tình trạng'],action];
+}
+
+async function managementView() {
+  await loadManagement();
+  const entity=management.entity, needle=management.query.trim().toLocaleLowerCase('vi');
+  const rows=(management.data[entity]||[]).filter(row=>!needle || `${row.code} ${row.name} ${row.client_name||''} ${row.owner_name||''}`.toLocaleLowerCase('vi').includes(needle));
+  const cards=Object.entries(MANAGEMENT_LABELS).map(([key,label])=>{
+    const count=management.summary[key]||{};
+    return `<button class="manage-stat ${entity===key?'active':''}" data-manage-entity="${key}"><span>${esc(label)}</span><b>${fmt(count.active)}</b><small>${fmt(count.total)} tổng cộng</small></button>`;
+  }).join('');
+  return `<div class="management-intro"><div><h2>Trung tâm quản lý</h2><p>Mọi thay đổi được kiểm tra quan hệ, lưu lịch sử và không có thao tác xóa vĩnh viễn.</p></div><span class="pill">Database là nguồn dữ liệu quản trị</span></div>
+    <div class="manage-stats">${cards}</div>
+    <div class="panel"><div class="manage-toolbar"><div><h2>${esc(MANAGEMENT_LABELS[entity])} <small>${fmt(rows.length)} bản ghi</small></h2><p class="muted">Mã được tự sinh; dùng Ngưng hoạt động thay vì xóa.</p></div><div class="manage-controls"><input id="manageSearch" type="search" placeholder="Tìm theo mã hoặc tên…" value="${esc(management.query)}"><button class="button primary" id="manageAdd">+ Thêm ${esc(MANAGEMENT_LABELS[entity])}</button></div></div>${table(rows,managementColumns(entity))}</div>
+    <div class="panel"><h2>Lịch sử thay đổi gần nhất</h2>${table(management.audit.slice(0,20),[
+      [row=>new Date(row.created_at).toLocaleString('vi-VN'),'Thời điểm'],[row=>MANAGEMENT_LABELS[row.entity_type]||row.entity_type,'Danh mục'],['entity_code','Mã'],
+      [row=>esc({create:'Tạo mới',update:'Cập nhật',activate:'Kích hoạt',deactivate:'Ngưng hoạt động'}[row.action]||row.action),'Thao tác'],
+      [row=>esc((row.changed_fields||[]).join(', ')),'Trường thay đổi']
+    ])}</div>`;
+}
+
+function formOptions(type,current) {
+  if (type === 'clients') return (management.data.clients||[]).filter(row=>row.active || row.code===current).map(row=>`<option value="${esc(row.code)}" ${row.code===current?'selected':''}>${esc(row.code)} · ${esc(row.name)}</option>`).join('');
+  if (type === 'staff') return `<option value="">Chưa phân công</option>`+(management.data.staff||[]).filter(row=>row.active || row.id===current).map(row=>`<option value="${esc(row.id)}" ${row.id===current?'selected':''}>${esc(row.code)} · ${esc(row.name)}</option>`).join('');
+  return '';
+}
+
+function fieldControl([field,label,type,required],row) {
+  const value=row?.[field]??'', req=required?'required':'';
+  if(type==='checkbox') return `<label class="form-check"><input data-field="${field}" type="checkbox" ${value===true || (!row && field==='active')?'checked':''}><span>${esc(label)}</span></label>`;
+  if(type==='textarea') return `<label class="form-field wide"><span>${esc(label)}</span><textarea data-field="${field}" ${req}>${esc(value)}</textarea></label>`;
+  if(type==='clients'||type==='staff') return `<label class="form-field"><span>${esc(label)}${required?' *':''}</span><select data-field="${field}" ${req}>${!required?'<option value="">—</option>':''}${formOptions(type,value)}</select></label>`;
+  const min=type==='number'?'min="0"':'';
+  return `<label class="form-field"><span>${esc(label)}${required?' *':''}</span><input data-field="${field}" type="${type}" value="${esc(value)}" ${min} ${req}></label>`;
+}
+
+function openCatalogForm(row=null) {
+  const entity=management.entity, isEdit=Boolean(row), code=row?.code||management.suggestions[entity]||'';
+  const overlay=document.createElement('div'); overlay.className='modal-backdrop';
+  overlay.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="catalogFormTitle"><div class="modal-head"><div><p class="eyebrow">${isEdit?'CHỈNH SỬA':'TẠO MỚI'}</p><h2 id="catalogFormTitle">${esc(MANAGEMENT_LABELS[entity])}</h2></div><button class="modal-close" type="button" aria-label="Đóng">×</button></div>
+    <form id="catalogForm"><div class="form-grid"><label class="form-field"><span>Mã</span><input value="${esc(code)}" readonly></label>${MANAGEMENT_FORMS[entity].map(field=>fieldControl(field,row)).join('')}</div>
+    ${isEdit?'<p class="form-note">Không thể đổi mã. Nếu ngưng hoạt động, hệ thống giữ nguyên lịch sử và dữ liệu báo cáo.</p>':'<p class="form-note">Sau khi lưu, report key được tạo ngay cho Khách hàng/Brand và CONFIG được xếp hàng đồng bộ.</p>'}
+    <div class="modal-actions"><button class="button secondary modal-cancel" type="button">Hủy</button><button class="button primary" type="submit">${isEdit?'Lưu thay đổi':'Tạo mới'}</button></div></form></section>`;
+  document.body.appendChild(overlay);
+  const close=()=>overlay.remove(); overlay.querySelector('.modal-close').onclick=close; overlay.querySelector('.modal-cancel').onclick=close;
+  overlay.onclick=event=>{if(event.target===overlay)close();};
+  overlay.querySelector('form').onsubmit=async event=>{
+    event.preventDefault(); const submit=event.submitter; submit.disabled=true;
+    const payload={}; overlay.querySelectorAll('[data-field]').forEach(input=>{payload[input.dataset.field]=input.type==='checkbox'?input.checked:input.value;});
+    if(!isEdit) payload.code=code; else payload.expectedVersion=row.change_version;
+    if(isEdit && row.active && payload.active===false && !window.confirm('Xác nhận ngưng hoạt động? Dữ liệu cũ vẫn được giữ nguyên.')){submit.disabled=false;return;}
+    try{
+      const result=await apiWrite(isEdit?'PATCH':'POST',isEdit?`/api/admin/catalog/${entity}/${encodeURIComponent(row.id)}`:`/api/admin/catalog/${entity}`,payload);
+      close(); management.loaded=false; await loadManagement(true); D.masters=await api('/api/masters'); await reRenderContent();
+      const sync=result.propagation?.state==='queued'?' Đã xếp hàng đẩy CONFIG.':result.propagation?.message?` ${result.propagation.message}`:'';
+      toast(`Đã ${isEdit?'cập nhật':'tạo'} ${MANAGEMENT_LABELS[entity]}.${sync}`,'ok');
+    }catch(error){toast('Không thể lưu: '+error.message,'error');submit.disabled=false;}
+  };
+  setTimeout(()=>overlay.querySelector('[data-field="name"]')?.focus(),0);
+}
+
+async function openStaffReport(id) {
+  const overlay=document.createElement('div'); overlay.className='modal-backdrop';
+  overlay.innerHTML=`<section class="modal report-modal" role="dialog" aria-modal="true"><div class="modal-head"><div><p class="eyebrow">BÁO CÁO NHÂN SỰ</p><h2>Đang tải…</h2></div><button class="modal-close" type="button" aria-label="Đóng">×</button></div><div class="loading"><span class="spinner"></span>Đang tổng hợp báo cáo…</div></section>`;
+  document.body.appendChild(overlay); const close=()=>overlay.remove(); overlay.querySelector('.modal-close').onclick=close; overlay.onclick=event=>{if(event.target===overlay)close();};
+  try{
+    const report=await api(`/api/admin/reports/staff/${encodeURIComponent(id)}`),o=report.overview||{};
+    const modal=overlay.querySelector('.modal');
+    modal.innerHTML=`<div class="modal-head"><div><p class="eyebrow">BÁO CÁO NHÂN SỰ</p><h2>${esc(report.staff.code)} · ${esc(report.staff.name)}</h2><p class="muted">${esc(report.staff.role||'')} · ${range.from||'Từ đầu'} → ${range.to||'Hiện tại'}</p></div><button class="modal-close" type="button" aria-label="Đóng">×</button></div>
+      <div class="cards report-cards">${kpi('Bài đăng',fmt(o.posts))}${kpi('Tổng view',fmt(o.view))}${kpi('Bài viral',fmt(o.viral))}${kpi('ER',pct(o.er))}${kpi('Bonus',fmt(o.bonus)+'đ')}${kpi('Kênh phụ trách',fmt(report.channels.length))}</div>
+      <div class="panel"><h2>Kênh phụ trách</h2>${table(report.channels,[['code','Mã'],['name','Kênh'],['username','Username'],[row=>fmt(row.follower),'Follower'],[manageStatePill,'Trạng thái']])}</div>
+      <div class="panel report-posts"><h2>Chi tiết bài đăng <small>${fmt(report.posts.length)} dòng</small></h2>${table(report.posts,[[row=>fmtDate(row.posted_date),'Ngày'],['brand_text_raw','Brand'],['channel_name','Kênh'],[row=>fmt(row.realtime_view),'View'],[row=>fmt(row.realtime_like),'Like'],[row=>fmt(row.realtime_comment),'Cmt'],[row=>fmt(row.realtime_save),'Save'],[row=>fmt(row.realtime_share),'Share'],['viral_label','Viral'],[row=>fmt(row.bonus_amount)+'đ','Bonus'],[row=>row.post_url?`<a href="${esc(row.post_url)}" target="_blank" rel="noopener">Mở ↗</a>`:'','Link']])}</div>
+      <div class="modal-actions no-print"><button class="button secondary modal-export" type="button">Tải CSV</button><button class="button secondary modal-print" type="button">In / PDF</button><button class="button primary modal-close-bottom" type="button">Đóng</button></div>`;
+    modal.querySelector('.modal-close').onclick=close; modal.querySelector('.modal-close-bottom').onclick=close;
+    modal.querySelector('.modal-export').onclick=()=>exportTableCSV(modal.querySelector('.report-posts'),`bao-cao-${report.staff.code}-${report.staff.name}`);
+    modal.querySelector('.modal-print').onclick=()=>window.print();
+  }catch(error){overlay.querySelector('.loading').innerHTML=`<div class="error-banner">Không tải được báo cáo: ${esc(error.message)}</div>`;}
+}
+
 // ---- Links / customer portal (kept visually consistent with the other tabs) ----
 async function links() {
   const x = await api('/api/admin/report-links');
@@ -444,6 +578,7 @@ async function render() {
   let html = '';
   try {
     if (tab === 'overview') html = await overview();
+    else if (tab === 'manage') html = await managementView();
     else if (tab === 'sync') html = await syncView();
     else if (tab === 'alerts') html = alertsView();
     else if (tab === 'brand') html = brand();
@@ -489,6 +624,21 @@ function wireContentEvents() {
   const retry = $('#retryBtn');
   if (retry) retry.onclick = () => load(true);
   wireHeatmapRetry();
+
+  if (tab === 'manage') {
+    document.querySelectorAll('[data-manage-entity]').forEach(button=>button.onclick=()=>{management.entity=button.dataset.manageEntity;management.query='';reRenderContent();});
+    const search=$('#manageSearch');
+    if(search){
+      search.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();management.query=search.value;reRenderContent();}};
+      search.onsearch=()=>{management.query=search.value;reRenderContent();};
+    }
+    const add=$('#manageAdd'); if(add)add.onclick=()=>openCatalogForm();
+    document.querySelectorAll('[data-catalog-edit]').forEach(button=>button.onclick=()=>{
+      const row=(management.data[management.entity]||[]).find(item=>item.id===button.dataset.catalogEdit); if(row)openCatalogForm(row);
+    });
+    document.querySelectorAll('[data-staff-report]').forEach(button=>button.onclick=()=>openStaffReport(button.dataset.staffReport));
+    document.querySelectorAll('[data-channel-report]').forEach(button=>button.onclick=()=>{postFilter.channel=button.dataset.channelReport;postFilter.staff='';postFilter.offset=0;posts=null;tab='posts';location.hash='posts';render();});
+  }
 
   document.querySelectorAll('[data-sync-action]').forEach(button => button.onclick = async () => {
     const action = button.dataset.syncAction;

@@ -31,6 +31,10 @@ export function discoverNvFiles(files, { masterStaff } = {}) {
 
 export async function seedNvSources({ api, db, folderId=process.env.EMPLOYEE_FOLDER_ID, masterSpreadsheetId=process.env.MASTER_SPREADSHEET_ID, dryRun=false, masterStaff } = {}) {
   if (!folderId) throw new Error('EMPLOYEE_FOLDER_ID is required for NV source discovery');
+  if (masterStaff === undefined && process.env.CATALOG_AUTHORITY === 'database') {
+    const rows=(await db.query(`select nv_id,coalesce(status,raw_row->>9) status,active from staff where nv_id is not null and config_visible`)).rows;
+    masterStaff=new Map(rows.map(row=>[clean(row.nv_id).toUpperCase(),{nv_id:row.nv_id,status:row.active ? row.status : 'Đã nghỉ'}]));
+  }
   if (masterStaff === undefined) masterStaff = await readMasterStaffRegistry(api, masterSpreadsheetId);
   const result = discoverNvFiles(await api.listFolder(folderId), { masterStaff });
   const expected = process.env.NV_EXPECTED_ACTIVE_COUNT ? Number(process.env.NV_EXPECTED_ACTIVE_COUNT) : null;
