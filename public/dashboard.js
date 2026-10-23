@@ -61,7 +61,7 @@ function aiActions(actions, sources) {
   return `<section class="ai-block actions"><h4>Việc nên làm tiếp</h4><div class="ai-action-list">${actions.map(action => {
     if (typeof action === 'string') return `<div class="ai-action-card"><b>${esc(action)}</b></div>`;
     const source = labels.get(action.sourceId);
-    return `<div class="ai-action-card"><div><span class="ai-priority ${action.priority === 'Cao' ? 'high' : action.priority === 'Vừa' ? 'medium' : ''}">${esc(action.priority || 'Theo dõi')}</span><b>${esc(action.subject || 'Vận hành')}</b></div><p>${esc(action.task || '')}</p>${action.reason ? `<small>${esc(action.reason)}</small>` : ''}${source ? `<a href="${esc((sources || []).find(item => item.id === action.sourceId)?.href || '#')}" data-ai-source="1">Nguồn: ${esc(source)}</a>` : ''}</div>`;
+    return `<div class="ai-action-card"><div><span class="ai-priority ${action.priority === 'Cao' ? 'high' : action.priority === 'Vừa' ? 'medium' : ''}">${esc(action.priority || 'Theo dõi')}</span><b>${esc(action.subject || 'Vận hành')}</b></div><p>${esc(aiReadableText(action.task, sources))}</p>${action.reason ? `<small>${esc(aiReadableText(action.reason, sources))}</small>` : ''}${source ? `<a href="${esc((sources || []).find(item => item.id === action.sourceId)?.href || '#')}" data-ai-source="1">Nguồn: ${esc(source)}</a>` : ''}</div>`;
   }).join('')}</div></section>`;
 }
 
@@ -75,7 +75,7 @@ function renderAiReply(payload) {
     <p class="ai-answer-main">${esc(aiReadableText(r.answer, sourceRows))}</p>
     ${aiList('Điểm đáng chú ý', (r.findings || []).map(item => aiReadableText(item, sourceRows)))}
     ${aiActions(r.actions, sourceRows)}
-    ${aiList('Giới hạn cần biết', [...(r.caveats || []), ...(ctx.limitations || [])], 'caveats')}
+    ${aiList('Giới hạn cần biết', [...(r.caveats || []), ...(ctx.limitations || [])].map(item => aiReadableText(item, sourceRows)), 'caveats')}
     ${sources ? `<details class="ai-sources"><summary>Nguồn dữ liệu (${payload.sources.length})</summary><ul>${sources}</ul></details>` : ''}
   </article>`;
 }
