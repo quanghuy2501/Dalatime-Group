@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, route, safeReply, validateAnalyticsPlan } from '../src/ai/analyst.mjs';
+import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, naturalQuestionPeriod, route, safeReply, validateAnalyticsPlan } from '../src/ai/analyst.mjs';
 import { createApp } from '../src/server.mjs';
 
 test('reporting scope labels absent rows honestly instead of declaring missed reports', async () => {
@@ -43,6 +43,13 @@ test('analytics planner accepts only allowlisted operations and exact catalog en
 test('router does not confuse trung bình with duplicate data', () => {
   assert.equal(route('Xếp hạng brand có view trung bình cao nhất', 'auto', [], [], []).scope, 'analytics');
   assert.equal(route('Kiểm tra dữ liệu trùng URL', 'auto', [], [], []).scope, 'quality');
+});
+
+test('natural language rolling periods are calculated inclusively in Vietnam time', () => {
+  const now = new Date('2026-10-23T03:00:00Z');
+  assert.deepEqual(naturalQuestionPeriod('So sánh trong 30 ngày gần nhất', now), { from: '2026-09-24', to: '2026-10-23' });
+  assert.deepEqual(naturalQuestionPeriod('Xu hướng 8 tuần gần nhất', now), { from: '2026-08-29', to: '2026-10-23' });
+  assert.deepEqual(naturalQuestionPeriod('Kết quả tháng trước', now), { from: '2026-09-01', to: '2026-09-30' });
 });
 
 test('structured analyst actions keep priority, evidence and concrete task', () => {

@@ -38,6 +38,18 @@ function embeddedDate(question) {
   const vi = clean(question).match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](20\d{2})\b/);
   return vi ? validDate(`${vi[3]}-${String(vi[2]).padStart(2, '0')}-${String(vi[1]).padStart(2, '0')}`) : '';
 }
+export function naturalQuestionPeriod(question, now = new Date()) {
+  const q = norm(question), today = localDate(now);
+  const days = q.match(/\b(\d{1,2}) ngay (?:gan nhat|qua)\b/);
+  if (days) { const count = Math.min(Math.max(Number(days[1]), 1), 92); return { from: addDays(today, -(count - 1)), to: today }; }
+  const weeks = q.match(/\b(\d{1,2}) tuan (?:gan nhat|qua)\b/);
+  if (weeks) { const count = Math.min(Math.max(Number(weeks[1]) * 7, 1), 92); return { from: addDays(today, -(count - 1)), to: today }; }
+  if (/\bhom nay\b/.test(q)) return { from: today, to: today };
+  if (/\bhom qua\b/.test(q)) { const yesterday = addDays(today, -1); return { from: yesterday, to: yesterday }; }
+  if (/\bthang nay\b/.test(q)) return { from: `${today.slice(0, 7)}-01`, to: today };
+  if (/\bthang truoc\b/.test(q)) { const firstThisMonth = `${today.slice(0, 7)}-01`, to = addDays(firstThisMonth, -1); return { from: `${to.slice(0, 7)}-01`, to }; }
+  return null;
+}
 function findEntity(question, rows, type) {
   const q = norm(question);
   const found = rows.map(row => ({ ...row, key: norm(row.name) })).filter(row => row.key.length >= 3 && q.includes(row.key)).sort((a, b) => b.key.length - a.key.length);
@@ -344,8 +356,9 @@ export async function buildAnalystContext(db, input, now = new Date()) {
   const question = clean(input?.question), requested = clean(input?.scope || 'auto');
   if (question.length < 5 || question.length > 500) throw new AnalystError('Câu hỏi phải từ 5 đến 500 ký tự.');
   if (!SCOPES.has(requested)) throw new AnalystError('Phạm vi phân tích không hợp lệ.');
-  const plannedFrom = validDate(input?.__analyticsPlan?.from), plannedTo = validDate(input?.__analyticsPlan?.to);
-  const window = period(plannedFrom && plannedTo ? { ...input, from: plannedFrom, to: plannedTo } : input, now), available = await loadCatalogs(db), selected = route(question, requested, available.brands, available.staff, available.channels);
+  const naturalWindow = naturalQuestionPeriod(question, now), plannedFrom = validDate(input?.__analyticsPlan?.from), plannedTo = validDate(input?.__analyticsPlan?.to);
+  const periodInput = naturalWindow ? { ...input, ...naturalWindow } : plannedFrom && plannedTo ? { ...input, from: plannedFrom, to: plannedTo } : input;
+  const window = period(periodInput, now), available = await loadCatalogs(db), selected = route(question, requested, available.brands, available.staff, available.channels);
   if (selected.scope === 'brand') return brand(db, selected.entity, window, now);
   if (selected.scope === 'staff') return staff(db, selected.entity, window, now);
   if (selected.scope === 'reporting') return reporting(db, question, window, now);
