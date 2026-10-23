@@ -200,7 +200,8 @@ export function validateAnalyticsPlan(value, catalogs) {
   if (queryType === 'inactive_channels') groupBy = 'channel';
   if (queryType === 'trend' && ['none', 'date'].includes(groupBy)) groupBy = 'brand';
   const requestedMetrics = [...new Set((Array.isArray(value?.metrics) ? value.metrics : []).filter(metric => ANALYTICS_METRICS.has(metric)))].slice(0, 6);
-  const sortMetric = ANALYTICS_METRICS.has(value?.sortMetric) ? value.sortMetric : (requestedMetrics[0] || 'views');
+  let sortMetric = ANALYTICS_METRICS.has(value?.sortMetric) ? value.sortMetric : (requestedMetrics[0] || 'views');
+  if (queryType === 'trend' && !['posts', 'views', 'interactions', 'er', 'viral', 'exclusive', 'avg_views', 'avg_interactions'].includes(sortMetric)) sortMetric = 'views';
   const metrics = [...new Set([sortMetric, ...requestedMetrics])].slice(0, 6);
   const sortDirection = value?.sortDirection === 'asc' ? 'asc' : 'desc';
   const filters = value?.filters || {};
@@ -295,17 +296,24 @@ async function analytics(db, question, planValue, catalogs, window, now) {
     const rows = await db.query(`select ${dimension} name,date_trunc('week',p.posted_date)::date::text period,count(*)::int posts,
       coalesce(sum(p.realtime_view),0)::bigint views,coalesce(sum(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0)),0)::bigint interactions,
       case when coalesce(sum(p.realtime_view),0)>0 then sum(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0))::numeric/sum(p.realtime_view) else 0 end er,
-      count(*) filter(where coalesce(p.viral_label,'')<>'')::int viral
+      count(*) filter(where coalesce(p.viral_label,'')<>'')::int viral,count(*) filter(where p.is_exclusive)::int exclusive,
+      coalesce(avg(p.realtime_view),0)::numeric avg_views,coalesce(avg(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0)),0)::numeric avg_interactions
       from reporting_posts_current p ${joins} where ${whereSql} group by ${dimension},date_trunc('week',p.posted_date)::date order by name,period limit 6000`, values);
     const groups = new Map();
     for (const row of rows.rows) { if (!groups.has(row.name)) groups.set(row.name, []); groups.get(row.name).push(row); }
-    const groupScore = entries => plan.sortMetric === 'er' ? entries.reduce((sum, row) => sum + num(row.interactions), 0) / Math.max(entries.reduce((sum, row) => sum + num(row.views), 0), 1) : entries.reduce((sum, row) => sum + num(row[plan.sortMetric]), 0);
+    const weekStart = value => { const date = new Date(`${value}T00:00:00Z`); const day = date.getUTCDay(); date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1)); return date.toISOString().slice(0, 10); };
+    const currentWeek = weekStart(localDate(now));
+    const trendValue = row => plan.sortMetric === 'er' ? num(row.er) : num(row[plan.sortMetric]);
+    const comparable = entries => entries.filter(row => row.period !== currentWeek && !(row.period === weekStart(window.from) && row.period !== window.from));
+    const zeroCanMeanUncollected = ['views', 'interactions', 'er', 'avg_views', 'avg_interactions'].includes(plan.sortMetric);
+    const trendEntries = entries => comparable(entries).filter(row => !zeroCanMeanUncollected || trendValue(row) > 0);
+    const change = entries => { const values = trendEntries(entries), first = trendValue(values[0] || {}), last = trendValue(values.at(-1) || {}); return values.length >= 2 && first > 0 ? (last - first) / first : null; };
     const direction = plan.sortDirection === 'asc' ? 1 : -1;
-    const selectedGroups = [...groups.entries()].sort((a, b) => direction * (groupScore(a[1]) - groupScore(b[1]))).slice(0, Math.min(plan.limit, 8));
-    const trendMetrics = [...new Set(['posts', ...plan.metrics.filter(metric => ['views', 'interactions', 'er', 'viral'].includes(metric))])];
-    const lines = selectedGroups.map(([name, entries]) => `${name}: ${entries.slice(-8).map(row => `${row.period} ${metricFragments(row, trendMetrics).join('/')}`).join(' · ')}`);
+    const selectedGroups = [...groups.entries()].map(([name, entries]) => [name, entries, change(entries)]).filter(([, , score]) => score != null).sort((a, b) => direction * (a[2] - b[2])).slice(0, Math.min(plan.limit, 8));
+    const trendMetrics = [...new Set(['posts', ...plan.metrics.filter(metric => ['views', 'interactions', 'er', 'viral', 'exclusive', 'avg_views', 'avg_interactions'].includes(metric))])];
+    const lines = selectedGroups.map(([name, entries, score]) => `${name} · thay đổi ${(score * 100).toFixed(1)}%: ${trendEntries(entries).slice(-8).map(row => `${row.period} ${metricFragments(row, trendMetrics).join('/')}`).join(' · ')}`);
     ctx.add(`Xu hướng theo tuần của ${plan.groupBy}`, lines.join('\n') || 'Không có dữ liệu phù hợp', plan.groupBy === 'brand' ? '/#brand' : plan.groupBy === 'staff' ? '/#staff' : '/#channel');
-    ctx.limitations.push('Xu hướng được gom theo tuần bắt đầu từ thứ Hai; kỳ đầu hoặc cuối có thể là tuần chưa đủ ngày. Giá trị view/tương tác bằng 0 là số đang lưu tại thời điểm phân tích, không tự chứng minh hiệu suất thực tế bằng 0.');
+    ctx.limitations.push('Xếp hạng xu hướng dùng % thay đổi giữa tuần hoàn chỉnh đầu và cuối; loại tuần hiện tại, tuần đầu chưa đủ ngày, nhóm không có baseline dương và tuần có view/tương tác bằng 0 vì chưa phân biệt được hiệu suất 0 với chỉ số chưa thu thập.');
   } else {
     const { expression: dimension, joins: dimensionJoin } = analyticsDimension(plan.groupBy);
     const groupSql = plan.groupBy === 'none' ? '' : `group by ${dimension}`;
