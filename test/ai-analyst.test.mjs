@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, safeReply, validateAnalyticsPlan } from '../src/ai/analyst.mjs';
+import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, route, safeReply, validateAnalyticsPlan } from '../src/ai/analyst.mjs';
 import { createApp } from '../src/server.mjs';
 
 test('reporting scope labels absent rows honestly instead of declaring missed reports', async () => {
@@ -38,6 +38,11 @@ test('analytics planner accepts only allowlisted operations and exact catalog en
   assert.equal(plan.limit, 30);
   assert.deepEqual(plan.filters.brands, ['ALIEN LIMOUSINE']);
   assert.throws(() => validateAnalyticsPlan({ filters: { brands: ['Không tồn tại'], staff: [], channels: [] } }, catalogs), error => error instanceof AnalystError && error.statusCode === 422);
+});
+
+test('router does not confuse trung bình with duplicate data', () => {
+  assert.equal(route('Xếp hạng brand có view trung bình cao nhất', 'auto', [], [], []).scope, 'analytics');
+  assert.equal(route('Kiểm tra dữ liệu trùng URL', 'auto', [], [], []).scope, 'quality');
 });
 
 test('structured analyst actions keep priority, evidence and concrete task', () => {

@@ -46,7 +46,7 @@ function findEntity(question, rows, type) {
   if (new Set(top.map(row => row.key)).size > 1) throw new AnalystError(`Tên ${type} chưa rõ. Anh ghi đầy đủ tên cần hỏi.`, 422, { suggestions: top.slice(0, 5).map(row => row.name) });
   return top[0];
 }
-function route(question, requested, brands, staff, channels = []) {
+export function route(question, requested, brands, staff, channels = []) {
   const q = norm(question), brand = findEntity(question, brands, 'brand'), person = findEntity(question, staff, 'nhân sự'), channel = findEntity(question, channels, 'kênh');
   if (requested === 'brand') {
     if (!brand) throw new AnalystError('Em chưa xác định được brand. Anh ghi đúng tên brand trong câu hỏi.', 422, { suggestions: brands.slice(0, 8).map(row => row.name) });
@@ -57,7 +57,7 @@ function route(question, requested, brands, staff, channels = []) {
     return { scope: 'staff', entity: person };
   }
   if (requested !== 'auto') return { scope: requested };
-  if (/sai sot|loi du lieu|du lieu sai|trung|thieu link|dong bo|sync|chat luong du lieu/.test(q)) return { scope: 'quality' };
+  if (/sai sot|loi du lieu|du lieu sai|du lieu trung|trung lap|trung url|thieu link|dong bo|sync|chat luong du lieu/.test(q)) return { scope: 'quality' };
   if (/chua bao cao|thieu bao cao|khong bao cao|ngay nao.*bao cao|ai.*bao cao|khong co bai|ngay nao.*co bai|ai.*co bai/.test(q)) return { scope: 'reporting' };
   if (/tong quan|he thong.*the nao|tinh hinh.*he thong|van de gi.*xu ly|can xu ly.*truoc|canh bao hien tai/.test(q)) return { scope: 'operations' };
   if (channel || /so sanh|xep hang|top\b|cao nhat|thap nhat|nhieu nhat|it nhat|trung binh|xu huong|lien tuc|theo ngay|theo kenh|theo brand|theo nhan su|bai nao|kenh nao|brand nao|nhan su nao|bat thuong|ngu lau|khong dang|tiktok|facebook|nen tang/.test(q)) return { scope: 'analytics' };
