@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, safeReply } from '../src/ai/analyst.mjs';
+import { ANALYST_SYSTEM_PROMPT, AnalystError, buildAnalystContext, safeReply, validateAnalyticsPlan } from '../src/ai/analyst.mjs';
 import { createApp } from '../src/server.mjs';
 
 test('reporting scope labels absent rows honestly instead of declaring missed reports', async () => {
   const db = { query: async (sql) => {
     if (sql.includes('from brands where active')) return { rows: [{ id: 'b1', code: 'B1', name: 'Brand A' }] };
     if (sql.includes('from staff where active order')) return { rows: [{ id: 's1', code: 'NV01', name: 'Nguyễn An', role: 'Content' }] };
+    if (sql.includes('from channels where active')) return { rows: [] };
     if (sql.includes('with days as')) return { rows: [{ nv_id: 'NV01', name: 'Nguyễn An', no_post_dates: ['2026-10-22'], posts: 0 }] };
     throw new Error(`unexpected query: ${sql.slice(0, 80)}`);
   } };
@@ -28,6 +29,20 @@ test('analyst rejects long Vietnamese answers without diacritics so caller can u
   assert.throws(() => safeReply({ title: 'Phan tich van hanh', answer: 'Du lieu van hanh duoc phan tich dung theo cac nguon da cung cap trong he thong va khong duoc phep tu y ket luan khi chua co du lieu.', findings: ['Can kiem tra them du lieu nguon.'] }, new Set()), error => error instanceof AnalystError && error.details.providerStatus === 'invalid_locale');
   const reply = safeReply({ title: 'Phân tích vận hành', answer: 'Dữ liệu vận hành được phân tích đúng theo nguồn.', findings: [] }, new Set());
   assert.match(reply.title, /Phân tích/);
+});
+
+test('analytics planner accepts only allowlisted operations and exact catalog entities', () => {
+  const catalogs = { brands: [{ name: 'ALIEN LIMOUSINE', code: 'CH01' }], staff: [{ name: 'Ánh Hoàng', code: 'NV01' }], channels: [{ name: 'Dalat Review', code: 'K01' }] };
+  const plan = validateAnalyticsPlan({ queryType: 'ranking', groupBy: 'channel', metrics: ['avg_views', 'DROP TABLE'], sortMetric: 'avg_views', sortDirection: 'desc', limit: 999, inactivityDays: 0, filters: { brands: ['CH01'], staff: [], channels: ['Dalat Review'] } }, catalogs);
+  assert.deepEqual(plan.metrics, ['avg_views']);
+  assert.equal(plan.limit, 30);
+  assert.deepEqual(plan.filters.brands, ['ALIEN LIMOUSINE']);
+  assert.throws(() => validateAnalyticsPlan({ filters: { brands: ['Không tồn tại'], staff: [], channels: [] } }, catalogs), error => error instanceof AnalystError && error.statusCode === 422);
+});
+
+test('structured analyst actions keep priority, evidence and concrete task', () => {
+  const reply = safeReply({ title: 'Kiểm tra', answer: 'Có dữ liệu nguồn.', findings: [], actions: [{ priority: 'Cao', subject: 'Kênh A', task: 'Mở mục Đồng bộ và kiểm tra quyền truy cập.', reason: 'Nguồn gần nhất báo lỗi.', sourceId: 'S1' }], caveats: [], citedSourceIds: ['S1'] }, new Set(['S1']));
+  assert.deepEqual(reply.actions[0], { priority: 'Cao', subject: 'Kênh A', task: 'Mở mục Đồng bộ và kiểm tra quyền truy cập.', reason: 'Nguồn gần nhất báo lỗi.', sourceId: 'S1' });
 });
 
 test('AI endpoint is admin-only and never available to bearer service token', async t => {

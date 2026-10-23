@@ -31,7 +31,7 @@
       </header>
       <form id="aiForm" class="ai-form">
         <div class="ai-controls">
-          <label>Phạm vi<select id="aiScope"><option value="auto">Tự động nhận diện</option><option value="operations">Tổng quan vận hành</option><option value="brand">Brand</option><option value="staff">Nhân sự</option><option value="reporting">Ngày không có bài</option><option value="quality">Sai sót dữ liệu</option></select></label>
+          <label>Phạm vi<select id="aiScope"><option value="auto">Tự động nhận diện</option><option value="analytics">Phân tích linh hoạt</option><option value="operations">Tổng quan vận hành</option><option value="brand">Brand</option><option value="staff">Nhân sự</option><option value="reporting">Ngày không có bài</option><option value="quality">Sai sót dữ liệu</option></select></label>
           <label>Từ ngày<input id="aiFrom" type="date"></label>
           <label>Đến ngày<input id="aiTo" type="date"></label>
         </div>
@@ -42,6 +42,10 @@
           <button type="button" data-ai-prompt="Nhân sự [tên nhân sự] trong kỳ này đang làm những brand nào, kết quả ra sao?">Tiến độ nhân sự</button>
           <button type="button" data-ai-prompt="Ngày 22/10/2026 nhân sự nào không có bài được ghi nhận?">Ngày không có bài</button>
           <button type="button" data-ai-prompt="Kiểm tra hệ thống đang có sai sót dữ liệu hoặc lỗi đồng bộ nào?">Kiểm tra sai sót</button>
+          <button type="button" data-ai-prompt="Xếp hạng 10 brand có view trung bình mỗi bài cao nhất trong kỳ.">Xếp hạng brand</button>
+          <button type="button" data-ai-prompt="Kênh nào đã lâu không có bài đăng được ghi nhận?">Kênh lâu không đăng</button>
+          <button type="button" data-ai-prompt="Những bài nào có tương tác cao nhất trong kỳ?">Top bài tương tác</button>
+          <button type="button" data-ai-prompt="Ngày nào sản lượng toàn đội thấp nhất trong kỳ?">Ngày sản lượng thấp</button>
         </div>
         <div class="ai-submit-row"><span>Tối đa 92 ngày mỗi lần phân tích.</span><button class="button primary" id="aiSubmit" type="submit">Phân tích</button></div>
       </form>

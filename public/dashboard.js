@@ -50,15 +50,31 @@ function aiList(title, items, className = '') {
   return `<section class="ai-block ${className}"><h4>${esc(title)}</h4><ul>${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul></section>`;
 }
 
+function aiReadableText(value, sources) {
+  const labels = new Map((sources || []).map(source => [source.id, source.label]));
+  return String(value || '').replace(/\[(S\d+)\]/g, (_, id) => labels.has(id) ? `[Nguồn: ${labels.get(id)}]` : '');
+}
+
+function aiActions(actions, sources) {
+  if (!actions || !actions.length) return '';
+  const labels = new Map((sources || []).map(source => [source.id, source.label]));
+  return `<section class="ai-block actions"><h4>Việc nên làm tiếp</h4><div class="ai-action-list">${actions.map(action => {
+    if (typeof action === 'string') return `<div class="ai-action-card"><b>${esc(action)}</b></div>`;
+    const source = labels.get(action.sourceId);
+    return `<div class="ai-action-card"><div><span class="ai-priority ${action.priority === 'Cao' ? 'high' : action.priority === 'Vừa' ? 'medium' : ''}">${esc(action.priority || 'Theo dõi')}</span><b>${esc(action.subject || 'Vận hành')}</b></div><p>${esc(action.task || '')}</p>${action.reason ? `<small>${esc(action.reason)}</small>` : ''}${source ? `<a href="${esc((sources || []).find(item => item.id === action.sourceId)?.href || '#')}" data-ai-source="1">Nguồn: ${esc(source)}</a>` : ''}</div>`;
+  }).join('')}</div></section>`;
+}
+
 function renderAiReply(payload) {
   const r = payload.reply || {}, ctx = payload.context || {};
-  const sources = (payload.sources || []).map(source => `<li><a href="${esc(source.href || '#')}" data-ai-source="1">[${esc(source.id)}] ${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('');
+  const sourceRows = payload.sources || [];
+  const sources = sourceRows.map((source, index) => `<li><small>Nguồn ${index + 1}</small><a href="${esc(source.href || '#')}" data-ai-source="1">${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('');
   return `<article class="ai-answer">
     <div class="ai-answer-meta"><span>${esc(ctx.scope || 'operations')}</span><span>${esc(ctx.period || '')}</span><span>${ctx.asOf ? new Date(ctx.asOf).toLocaleString('vi-VN') : ''}</span><span>${esc(ctx.model || '')}</span></div>
     <h3>${esc(r.title || 'Phân tích vận hành')}</h3>
-    <p class="ai-answer-main">${esc(r.answer || '')}</p>
-    ${aiList('Điểm đáng chú ý', r.findings)}
-    ${aiList('Việc nên làm tiếp', r.actions, 'actions')}
+    <p class="ai-answer-main">${esc(aiReadableText(r.answer, sourceRows))}</p>
+    ${aiList('Điểm đáng chú ý', (r.findings || []).map(item => aiReadableText(item, sourceRows)))}
+    ${aiActions(r.actions, sourceRows)}
     ${aiList('Giới hạn cần biết', [...(r.caveats || []), ...(ctx.limitations || [])], 'caveats')}
     ${sources ? `<details class="ai-sources"><summary>Nguồn dữ liệu (${payload.sources.length})</summary><ul>${sources}</ul></details>` : ''}
   </article>`;
@@ -86,7 +102,7 @@ function wireAi() {
       result.innerHTML = renderAiReply(payload);
       result.querySelectorAll('[data-ai-source]').forEach(link => link.onclick = () => closeAi());
     } catch (error) {
-      const fallback = error.payload?.sources?.length ? `<details class="ai-sources"><summary>Dữ kiện hệ thống vẫn đọc được</summary><ul>${error.payload.sources.map(source => `<li><a href="${esc(source.href || '#')}">[${esc(source.id)}] ${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('')}</ul></details>` : '';
+      const fallback = error.payload?.sources?.length ? `<details class="ai-sources"><summary>Dữ kiện hệ thống vẫn đọc được</summary><ul>${error.payload.sources.map((source, index) => `<li><small>Nguồn ${index + 1}</small><a href="${esc(source.href || '#')}">${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('')}</ul></details>` : '';
       const suggestions = error.payload?.suggestions?.length ? `<p class="ai-hint">Gợi ý: ${esc(error.payload.suggestions.join(', '))}</p>` : '';
       result.innerHTML = `<div class="ai-error"><b>Chưa thể trả lời</b><p>${esc(error.message)}</p>${suggestions}${fallback}</div>`;
     } finally { submit.disabled = false; submit.textContent = 'Phân tích'; }
