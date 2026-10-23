@@ -50,6 +50,12 @@ test('structured analyst actions keep priority, evidence and concrete task', () 
   assert.deepEqual(reply.actions[0], { priority: 'Cao', subject: 'Kênh A', task: 'Mở mục Đồng bộ và kiểm tra quyền truy cập.', reason: 'Nguồn gần nhất báo lỗi.', sourceId: 'S1' });
 });
 
+test('numeric answers receive a valid source when the model omits an inline citation', () => {
+  const reply = safeReply({ title: 'Kết quả', answer: 'Kênh A đạt trung bình 12.500 view mỗi bài.', findings: [], actions: [], caveats: [], citedSourceIds: [] }, new Set(['S1', 'S2']));
+  assert.match(reply.answer, /\[S1\]$/);
+  assert.deepEqual(reply.citedSourceIds, ['S1']);
+});
+
 test('AI endpoint is admin-only and never available to bearer service token', async t => {
   const previous = Object.fromEntries(['NODE_ENV','DASHBOARD_BASIC_USER','DASHBOARD_BASIC_PASS','DASHBOARD_AUTH_TOKEN','AUTH_SESSION_SECRET'].map(key => [key, process.env[key]]));
   Object.assign(process.env, { NODE_ENV: 'production', DASHBOARD_BASIC_USER: 'admin', DASHBOARD_BASIC_PASS: 'secret', DASHBOARD_AUTH_TOKEN: 'service', AUTH_SESSION_SECRET: 'test-secret' });

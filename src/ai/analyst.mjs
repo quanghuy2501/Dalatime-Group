@@ -274,6 +274,22 @@ async function analytics(db, question, planValue, catalogs, window, now) {
     const rows = await db.query(`select p.posted_date::text date,coalesce(nullif(p.brand_text_raw,''),'chưa tag') brand,coalesce(nullif(p.channel_name,''),'chưa gán') channel,coalesce(nullif(p.owner_name,''),'chưa gán') staff,p.realtime_view views,(coalesce(p.realtime_like,0)+coalesce(p.realtime_comment,0)+coalesce(p.realtime_save,0)+coalesce(p.realtime_share,0)) interactions,p.post_url
       from reporting_posts_current p where ${whereSql} order by ${sortMap[plan.sortMetric] || sortMap.views} ${plan.sortDirection},p.posted_date desc limit $${values.length}`, values);
     ctx.add('Danh sách bài phù hợp câu hỏi', rows.rows.map(row => `${row.date} · ${row.brand} · ${row.channel} · ${row.staff} · ${fmt(row.views)} view · ${fmt(row.interactions)} tương tác · ${row.post_url}`).join('\n') || 'Không có bài phù hợp', '/#posts');
+  } else if (plan.queryType === 'timeseries') {
+    const selected = Object.entries(analyticsMetricSql).filter(([key]) => key !== 'brands').map(([key, sql]) => `${sql} ${key}`).join(',');
+    const rows = await db.query(`with days as (select generate_series($1::date,$2::date,'1 day')::date report_date),daily as (
+      select p.posted_date::date report_date,${selected},count(distinct nullif(p.brand_text_raw,''))::int brands
+      from reporting_posts_current p where ${whereSql} group by p.posted_date::date)
+      select d.report_date::text name,coalesce(x.posts,0)::int posts,coalesce(x.views,0)::bigint views,coalesce(x.interactions,0)::bigint interactions,
+      coalesce(x.er,0)::numeric er,coalesce(x.viral,0)::int viral,coalesce(x.exclusive,0)::int exclusive,coalesce(x.avg_views,0)::numeric avg_views,
+      coalesce(x.avg_interactions,0)::numeric avg_interactions,coalesce(x.brands,0)::int brands,coalesce(x.channels,0)::int channels,coalesce(x.staff,0)::int staff
+      from days d left join daily x on x.report_date=d.report_date order by d.report_date limit 92`, values);
+    const direction = plan.sortDirection === 'asc' ? 1 : -1;
+    const today = localDate(now), excludePartialToday = window.to === today && window.from < today;
+    const comparableRows = excludePartialToday ? rows.rows.filter(row => row.name !== today) : rows.rows;
+    const ranked = comparableRows.sort((a, b) => direction * (num(a[plan.sortMetric]) - num(b[plan.sortMetric])) || String(a.name).localeCompare(String(b.name))).slice(0, plan.limit);
+    ctx.add('Kết quả theo ngày trong kỳ', ranked.map(row => analyticsLine(row, plan.metrics)).join('\n'), '/#overview');
+    ctx.limitations.push('Lịch bao gồm mọi ngày trong kỳ; ngày 0 bài nghĩa là không có bài được ghi nhận trong DB, không tự động kết luận đội ngũ vi phạm lịch làm hoặc định mức.');
+    if (excludePartialToday) ctx.limitations.push(`Ngày hiện tại ${today} chưa kết thúc nên được loại khỏi xếp hạng ngày cao/thấp.`);
   } else if (plan.queryType === 'trend') {
     const { expression: dimension, joins } = analyticsDimension(plan.groupBy);
     const rows = await db.query(`select ${dimension} name,date_trunc('week',p.posted_date)::date::text period,count(*)::int posts,
@@ -340,10 +356,16 @@ const PLAN_SCHEMA = { type: 'OBJECT', properties: {
 }, required: ['queryType', 'groupBy', 'metrics', 'sortMetric', 'sortDirection', 'from', 'to', 'limit', 'inactivityDays', 'filters'] };
 export function safeReply(value, allowed) {
   const text = item => clean(item).replace(/[*#`]/g, '').slice(0, 1500), list = (items, max = 6) => (Array.isArray(items) ? items : []).map(text).filter(Boolean).slice(0, max);
+  const firstSourceId = [...allowed][0] || '';
+  const ensureCitation = item => item && /\d/.test(item) && !/\[S\d+\]/.test(item) && firstSourceId ? `${item} [${firstSourceId}]` : item;
   const actions = (Array.isArray(value?.actions) ? value.actions : []).slice(0, 3).map(item => typeof item === 'string'
     ? { priority: 'Theo dõi', subject: 'Vận hành', task: text(item), reason: '', sourceId: '' }
     : { priority: ['Cao', 'Vừa', 'Theo dõi'].includes(item?.priority) ? item.priority : 'Theo dõi', subject: text(item?.subject).slice(0, 180), task: text(item?.task).slice(0, 600), reason: text(item?.reason).slice(0, 600), sourceId: allowed.has(clean(item?.sourceId)) ? clean(item.sourceId) : '' }).filter(item => item.task);
-  const reply = { title: text(value?.title || 'Phân tích vận hành').slice(0, 160), answer: text(value?.answer).slice(0, 3000), findings: list(value?.findings), actions, caveats: list(value?.caveats), citedSourceIds: list(value?.citedSourceIds, 20).filter(id => allowed.has(id)) };
+  const answer = ensureCitation(text(value?.answer).slice(0, 3000));
+  const findings = list(value?.findings).map(ensureCitation);
+  const citedSourceIds = list(value?.citedSourceIds, 20).filter(id => allowed.has(id));
+  if (firstSourceId && (answer.includes(`[${firstSourceId}]`) || findings.some(item => item.includes(`[${firstSourceId}]`))) && !citedSourceIds.includes(firstSourceId)) citedSourceIds.push(firstSourceId);
+  const reply = { title: text(value?.title || 'Phân tích vận hành').slice(0, 160), answer, findings, actions, caveats: list(value?.caveats), citedSourceIds };
   const headline = [reply.title, reply.answer].join(' ');
   if (headline.length > 120 && !/[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(headline)) {
     throw new AnalystError('Gemini trả lời sai chuẩn tiếng Việt. Hệ thống đang thử model dự phòng.', 502, { providerStatus: 'invalid_locale' });
