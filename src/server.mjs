@@ -11,6 +11,7 @@ import { createJobWorker, enqueueJob, isAllowedWebhookAction, retryJob, syncStat
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER, verifyWebhookDetailed } from './adminSync/signature.mjs';
 import { catalogSummary, catalogSuggestions, createCatalogRow, getStaffReport, listCatalog, listCatalogAudit, updateCatalogRow } from './admin/catalog.mjs';
 import { isDatabaseCatalogAuthority } from './catalog/authority.mjs';
+import { AnalystError, answerAnalystQuestion } from './ai/analyst.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4177);
@@ -24,7 +25,7 @@ function validRange(query) {
   return date(query.from) && date(query.to) && !(query.from && query.to && query.from > query.to);
 }
 
-export function createApp({ dbConnector = connectDb, reportCustomers, jobWorker } = {}) {
+export function createApp({ dbConnector = connectDb, reportCustomers, jobWorker, analystService = answerAnalystQuestion } = {}) {
 const app = express();
 app.set('trust proxy', 1);
 jobWorker ||= createJobWorker({ dbConnector });
@@ -132,6 +133,21 @@ app.get('/api/issue-types', asyncRoute(async (req, res) => res.json(await appWit
 app.get('/api/masters', asyncRoute(async (req, res) => res.json(await appWithDb(getMasters))));
 app.get('/api/alerts', asyncRoute(async (req, res) => res.json(await appWithDb(getAlerts))));
 app.get('/api/heatmap', asyncRoute(async (req, res) => res.json(await appWithDb(db => getHeatmap(db, req.query)))));
+const analystRate=new Map();
+app.post('/api/ai/analyst', asyncRoute(async (req,res)=>{
+  if(!['session','basic'].includes(req.auth?.mechanism))return res.status(403).json({ok:false,error:'Chỉ tài khoản quản trị được dùng AI Vận hành.'});
+  const rateKey=`${actor(req)}:${String(req.ip||'unknown')}`,now=Date.now();
+  const recent=(analystRate.get(rateKey)||[]).filter(timestamp=>now-timestamp<60_000);
+  if(recent.length>=12)return res.status(429).json({ok:false,error:'Anh hỏi hơi nhanh. Vui lòng đợi một phút rồi thử lại.'});
+  recent.push(now);analystRate.set(rateKey,recent);
+  try{
+    const result=await appWithDb(db=>analystService({db,input:req.body,actor:actor(req)}));
+    res.set('Cache-Control','no-store');res.json(result);
+  }catch(error){
+    if(error instanceof AnalystError){res.set('Cache-Control','no-store');return res.status(error.statusCode).json({ok:false,error:error.message,...error.details});}
+    throw error;
+  }
+}));
 app.get('/api/admin/report-links', asyncRoute(async (req, res) => {
   const key = registryKey();
   const { clients, brands } = await appWithDb(async db => ({

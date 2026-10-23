@@ -22,6 +22,32 @@
       <section id="content" class="loading" aria-live="polite"><span class="spinner"></span>Đang tải dashboard…</section>
     </main>
   </div></div>
+  <button class="ai-fab no-print" id="aiOpen" type="button" aria-haspopup="dialog">✨ Hỏi AI</button>
+  <div class="ai-backdrop" id="aiBackdrop" hidden>
+    <section class="ai-modal" role="dialog" aria-modal="true" aria-labelledby="aiTitle">
+      <header class="ai-head">
+        <div><p class="eyebrow">AI VẬN HÀNH · CHỈ ĐỌC</p><h2 id="aiTitle">Hỏi Gemini về công việc</h2><p>AI dùng số liệu thật trong hệ thống, không tự sửa dữ liệu hay gửi tin.</p></div>
+        <button class="modal-close" id="aiClose" type="button" aria-label="Đóng">×</button>
+      </header>
+      <form id="aiForm" class="ai-form">
+        <div class="ai-controls">
+          <label>Phạm vi<select id="aiScope"><option value="auto">Tự động nhận diện</option><option value="operations">Tổng quan vận hành</option><option value="brand">Brand</option><option value="staff">Nhân sự</option><option value="reporting">Ngày không có bài</option><option value="quality">Sai sót dữ liệu</option></select></label>
+          <label>Từ ngày<input id="aiFrom" type="date"></label>
+          <label>Đến ngày<input id="aiTo" type="date"></label>
+        </div>
+        <label class="ai-question-label">Anh muốn kiểm tra gì?<textarea id="aiQuestion" maxlength="500" required placeholder="Ví dụ: Brand Ốm Sữa tháng này làm tới đâu so với kỳ trước?"></textarea></label>
+        <div class="ai-suggestions" aria-label="Câu hỏi gợi ý">
+          <button type="button" data-ai-prompt="Hệ thống hiện có vấn đề gì cần xử lý trước?">Việc cần xử lý</button>
+          <button type="button" data-ai-prompt="Brand [tên brand] trong kỳ này làm tới đâu so với kỳ trước?">Tiến độ brand</button>
+          <button type="button" data-ai-prompt="Nhân sự [tên nhân sự] trong kỳ này đang làm những brand nào, kết quả ra sao?">Tiến độ nhân sự</button>
+          <button type="button" data-ai-prompt="Ngày 22/10/2026 nhân sự nào không có bài được ghi nhận?">Ngày không có bài</button>
+          <button type="button" data-ai-prompt="Kiểm tra hệ thống đang có sai sót dữ liệu hoặc lỗi đồng bộ nào?">Kiểm tra sai sót</button>
+        </div>
+        <div class="ai-submit-row"><span>Tối đa 92 ngày mỗi lần phân tích.</span><button class="button primary" id="aiSubmit" type="submit">Phân tích</button></div>
+      </form>
+      <div class="ai-result" id="aiResult" aria-live="polite"><div class="ai-empty">Chọn câu hỏi gợi ý hoặc nhập câu hỏi vận hành của anh.</div></div>
+    </section>
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/dashboard.js" defer></script>
 </body>

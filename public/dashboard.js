@@ -26,6 +26,74 @@ let postFilter = { q: '', brand: '', channel: '', staff: '', sort: 'view', dir: 
 let heatmapState = { key: '', status: 'idle', rows: [], error: '' };
 let management = { loaded: false, entity: 'clients', query: '', data: {}, summary: {}, suggestions: {}, audit: [], links: { clients: [], brands: [] } };
 
+function aiDefaults() {
+  const today = todayStr();
+  return { from: `${today.slice(0, 7)}-01`, to: today };
+}
+
+function openAi() {
+  const modal = $('#aiBackdrop'), dates = aiDefaults();
+  if (!$('#aiFrom').value) $('#aiFrom').value = range.from || dates.from;
+  if (!$('#aiTo').value) $('#aiTo').value = range.to || dates.to;
+  modal.hidden = false;
+  document.body.classList.add('ai-open');
+  setTimeout(() => $('#aiQuestion').focus(), 0);
+}
+
+function closeAi() {
+  $('#aiBackdrop').hidden = true;
+  document.body.classList.remove('ai-open');
+}
+
+function aiList(title, items, className = '') {
+  if (!items || !items.length) return '';
+  return `<section class="ai-block ${className}"><h4>${esc(title)}</h4><ul>${items.map(item => `<li>${esc(item)}</li>`).join('')}</ul></section>`;
+}
+
+function renderAiReply(payload) {
+  const r = payload.reply || {}, ctx = payload.context || {};
+  const sources = (payload.sources || []).map(source => `<li><a href="${esc(source.href || '#')}" data-ai-source="1">[${esc(source.id)}] ${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('');
+  return `<article class="ai-answer">
+    <div class="ai-answer-meta"><span>${esc(ctx.scope || 'operations')}</span><span>${esc(ctx.period || '')}</span><span>${ctx.asOf ? new Date(ctx.asOf).toLocaleString('vi-VN') : ''}</span><span>${esc(ctx.model || '')}</span></div>
+    <h3>${esc(r.title || 'Phân tích vận hành')}</h3>
+    <p class="ai-answer-main">${esc(r.answer || '')}</p>
+    ${aiList('Điểm đáng chú ý', r.findings)}
+    ${aiList('Việc nên làm tiếp', r.actions, 'actions')}
+    ${aiList('Giới hạn cần biết', [...(r.caveats || []), ...(ctx.limitations || [])], 'caveats')}
+    ${sources ? `<details class="ai-sources"><summary>Nguồn dữ liệu (${payload.sources.length})</summary><ul>${sources}</ul></details>` : ''}
+  </article>`;
+}
+
+async function askAi(body) {
+  const response = await fetch('/api/ai/analyst', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(payload.error || `HTTP ${response.status}`); error.payload = payload; throw error; }
+  return payload;
+}
+
+function wireAi() {
+  $('#aiOpen').onclick = openAi;
+  $('#aiClose').onclick = closeAi;
+  $('#aiBackdrop').onclick = event => { if (event.target === $('#aiBackdrop')) closeAi(); };
+  document.querySelectorAll('[data-ai-prompt]').forEach(button => button.onclick = () => { $('#aiQuestion').value = button.dataset.aiPrompt; $('#aiQuestion').focus(); });
+  $('#aiForm').onsubmit = async event => {
+    event.preventDefault();
+    const submit = $('#aiSubmit'), result = $('#aiResult');
+    submit.disabled = true; submit.textContent = 'Đang phân tích…';
+    result.innerHTML = '<div class="ai-loading"><span class="spinner"></span><b>Đang đối chiếu dữ liệu và hỏi Gemini…</b><span>Không có dữ liệu nào bị sửa.</span></div>';
+    try {
+      const payload = await askAi({ question: $('#aiQuestion').value.trim(), scope: $('#aiScope').value, from: $('#aiFrom').value, to: $('#aiTo').value });
+      result.innerHTML = renderAiReply(payload);
+      result.querySelectorAll('[data-ai-source]').forEach(link => link.onclick = () => closeAi());
+    } catch (error) {
+      const fallback = error.payload?.sources?.length ? `<details class="ai-sources"><summary>Dữ kiện hệ thống vẫn đọc được</summary><ul>${error.payload.sources.map(source => `<li><a href="${esc(source.href || '#')}">[${esc(source.id)}] ${esc(source.label)}</a><span>${esc(source.value)}</span></li>`).join('')}</ul></details>` : '';
+      const suggestions = error.payload?.suggestions?.length ? `<p class="ai-hint">Gợi ý: ${esc(error.payload.suggestions.join(', '))}</p>` : '';
+      result.innerHTML = `<div class="ai-error"><b>Chưa thể trả lời</b><p>${esc(error.message)}</p>${suggestions}${fallback}</div>`;
+    } finally { submit.disabled = false; submit.textContent = 'Phân tích'; }
+  };
+  window.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#aiBackdrop').hidden) closeAi(); });
+}
+
 function qs(extra = {}) {
   const p = new URLSearchParams();
   if (range.from) p.set('from', range.from);
@@ -735,4 +803,5 @@ window.addEventListener('hashchange', () => {
   if (TAB_LABELS[h] && h !== tab) { tab = h; render(); }
 });
 
+wireAi();
 load();
