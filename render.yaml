@@ -52,9 +52,9 @@ services:
       - key: AI_ANALYST_ENABLED
         value: "1"
       - key: GEMINI_ANALYST_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.1-flash-lite-preview
       - key: GEMINI_ANALYST_FALLBACK_MODEL
-        value: gemini-3.5-flash-lite
+        value: gemini-2.5-flash
       - key: GEMINI_API_KEY
         sync: false
 

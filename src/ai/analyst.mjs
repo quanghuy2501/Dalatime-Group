@@ -175,8 +175,8 @@ const SCHEMA = { type: 'OBJECT', properties: { title: { type: 'STRING' }, answer
 export function safeReply(value, allowed) {
   const text = item => clean(item).replace(/[*#`]/g, '').slice(0, 1500), list = (items, max = 6) => (Array.isArray(items) ? items : []).map(text).filter(Boolean).slice(0, max);
   const reply = { title: text(value?.title || 'Phân tích vận hành').slice(0, 160), answer: text(value?.answer).slice(0, 3000), findings: list(value?.findings), actions: list(value?.actions, 4), caveats: list(value?.caveats), citedSourceIds: list(value?.citedSourceIds, 20).filter(id => allowed.has(id)) };
-  const prose = [reply.title, reply.answer, ...reply.findings, ...reply.actions, ...reply.caveats].join(' ');
-  if (prose.length > 120 && !/[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(prose)) {
+  const headline = [reply.title, reply.answer].join(' ');
+  if (headline.length > 120 && !/[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(headline)) {
     throw new AnalystError('Gemini trả lời sai chuẩn tiếng Việt. Hệ thống đang thử model dự phòng.', 502, { providerStatus: 'invalid_locale' });
   }
   return reply;
@@ -203,7 +203,7 @@ export async function answerAnalystQuestion({ db, input, actor = 'dashboard-sess
   if (process.env.AI_ANALYST_ENABLED !== '1') throw new AnalystError('AI Vận hành chưa được bật.', 503);
   const key = clean(process.env.GEMINI_API_KEY); if (!key) throw new AnalystError('Gemini chưa được cấu hình trên server.', 503);
   const question = clean(input?.question), ctx = await buildAnalystContext(db, input, now), started = Date.now();
-  const models = [...new Set([clean(process.env.GEMINI_ANALYST_MODEL || 'gemini-2.5-flash'), clean(process.env.GEMINI_ANALYST_FALLBACK_MODEL || 'gemini-3.5-flash-lite')].filter(Boolean))];
+  const models = [...new Set([clean(process.env.GEMINI_ANALYST_MODEL || 'gemini-3.1-flash-lite-preview'), clean(process.env.GEMINI_ANALYST_FALLBACK_MODEL || 'gemini-2.5-flash')].filter(Boolean))];
   let last;
   for (const model of models) {
     try { const reply = await modelCall({ key, model, question, ctx, fetchImpl }); await audit(db, { actor, ctx, model, question, status: 'ok', latency: Date.now() - started }); return { ok: true, reply, context: { scope: ctx.scope, period: ctx.period, asOf: ctx.asOf, limitations: ctx.limitations, model }, sources: ctx.sources }; }
