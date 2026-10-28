@@ -103,6 +103,22 @@ test('checkpoint page cache resumes completed pages and fetches only the missing
   assert.deepEqual(events.map(event=>event.resumed),[true,false]);
 });
 
+test('scheduled runner never republishes page cache from a failed prior run',async()=>{
+  const one=[sources[0]]; const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-fresh-run-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify({sources:one}));
+  let googleReads=0; let publishedChannel='';
+  const fresh=data(1); fresh[2]='Fresh Google Channel';
+  const db={end:async()=>{},query:async sql=>{
+    if(sql.includes('select c.version'))return {rows:[{version:'master-v1',mapping:COLUMN_MAPPING}]};
+    if(sql.includes('insert into sync_runs'))return {rows:[{id:'00000000-0000-0000-0000-000000000100'}]};
+    if(sql.includes('nv_ingestion_page_cache p join sync_runs'))throw new Error('cross-run cache must not be read');
+    return {rows:[]};
+  }};
+  const api={spreadsheetMeta:async()=>({sheets:[{properties:{title:'BAO CAO HANG NGAY',gridProperties:{rowCount:2}}}]}),values:async()=>{googleReads++;return {values:[header,fresh]};}};
+  await runDirectNvIngestion({db,api,registryFile:file,log:()=>{},publisher:async(_db,_run,_version,rows)=>{publishedChannel=rows[0].mapped_row.channel_name;return {rows:rows.length};}});
+  assert.equal(googleReads,1);
+  assert.equal(publishedChannel,'Fresh Google Channel');
+});
+
 test('runner emits page progress, heartbeat, and exactly one published final event',async()=>{
   const one=[sources[0]]; const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-output-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify({sources:one}));
   const events=[]; const db={end:async()=>{},query:async sql=>{

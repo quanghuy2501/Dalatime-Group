@@ -29,22 +29,6 @@ async function checkpoint(db, runId, { source,pageStart,pageEnd,page,nextRow,row
 const positiveInt=(value,fallback)=>Number.isSafeInteger(Number(value))&&Number(value)>0?Number(value):fallback;
 const defaultLog=event=>console.log(json({timestamp:new Date().toISOString(),...event}));
 
-async function resumablePages(db, configVersion) {
-  const result=await db.query(`select p.google_file_id,p.sheet_name,p.page_start,p.page_end,p.page_data
-    from nv_ingestion_page_cache p join sync_runs r on r.id=p.run_id
-    where r.run_type='direct_nv_ingestion' and r.status='fail' and r.meta->>'config_version'=$1
-      and p.run_id=(select r2.id from sync_runs r2 where r2.run_type='direct_nv_ingestion' and r2.status='fail'
-        and r2.meta->>'config_version'=$1 order by r2.started_at desc limit 1)
-    order by p.google_file_id,p.page_start`,[configVersion]);
-  const bySource=new Map();
-  for(const row of result.rows||[]) {
-    const key=`${row.google_file_id}:${row.sheet_name}`;
-    if(!bySource.has(key))bySource.set(key,new Map());
-    bySource.get(key).set(`${row.page_start}:${row.page_end}`,typeof row.page_data==='string'?JSON.parse(row.page_data):row.page_data);
-  }
-  return bySource;
-}
-
 function mirrorRows(rows, runId) {
   return rows.map(({mapped_row}) => ({ ...mapped_row, raw_values:json(mapped_row.raw_values), published_run_id:runId }));
 }
@@ -123,9 +107,11 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       checkpointQueue = next.catch(() => {});
       return next;
     };
-    const cached=await queued(()=>resumablePages(db,config.version));
+    // A scheduled run is a fresh source read. Cross-run page reuse can only be
+    // safe when the cache is bound to an immutable Google Drive revision; the
+    // current cache table is diagnostic evidence and deliberately not input.
     const rows=await collectNvRows({api,sources,configVersion:config.version,concurrency,pageRows,pageTimeoutMs,sourceTimeoutMs,
-      sourceRetries,checkpoint:safeCheckpoint,progress,resumePages:source=>cached.get(`${source.google_file_id}:${source.sheet_name}`)||new Map(),assertActive,deadlineAt});
+      sourceRetries,checkpoint:safeCheckpoint,progress,resumePages:()=>new Map(),assertActive,deadlineAt});
     await checkpointQueue;
     assertActive();
     const diagnostics = rows.diagnostics || {successful:sources.length,empty:0,failed:0,total:sources.length,errors:[],failed_sources:[],fresh_source_ids:sources.map(x=>x.google_file_id)};
