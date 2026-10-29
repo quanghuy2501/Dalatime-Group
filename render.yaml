@@ -15,6 +15,10 @@ services:
         value: "10000"
       - key: DATABASE_URL
         sync: false
+      # Bound web concurrency below the small Supabase transaction-pool budget.
+      # One dashboard request now uses one lease for its full payload.
+      - key: DB_POOL_MAX
+        value: "3"
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID

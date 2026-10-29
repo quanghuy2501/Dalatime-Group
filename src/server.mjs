@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { connectDb } from './db/postgres.mjs';
+import { connectAppDb } from './db/postgres.mjs';
 import { authMiddleware, credentialsMatch, createSessionCookie, clearSessionCookie } from './auth.mjs';
 import { getOverview, getTopBrands, getTopStaff, getTopChannels, getPosts, getHealth, getTimeseries, getIssues, getIssueTypes, getMasters, getAlerts, getHeatmap } from './db/queries.mjs';
 import { loadReportCustomers } from './report/config.mjs';
@@ -25,7 +25,7 @@ function validRange(query) {
   return date(query.from) && date(query.to) && !(query.from && query.to && query.from > query.to);
 }
 
-export function createApp({ dbConnector = connectDb, reportCustomers, jobWorker, analystService = answerAnalystQuestion } = {}) {
+export function createApp({ dbConnector = connectAppDb, reportCustomers, jobWorker, analystService = answerAnalystQuestion } = {}) {
 const app = express();
 app.set('trust proxy', 1);
 jobWorker ||= createJobWorker({ dbConnector });
@@ -239,12 +239,12 @@ app.get('/api/health', asyncRoute(async (req, res) => res.json(await appWithDb(d
 app.get('/api/dashboard', asyncRoute(async (req, res) => {
   const started = Date.now();
   try {
-    const [overview,brands,staff,channels,health,timeseries,alerts,masters,heatmap]=await Promise.all([
-      appWithDb(db=>getOverview(db,req.query)),appWithDb(db=>getTopBrands(db,20,req.query)),
-      appWithDb(db=>getTopStaff(db,20,req.query)),appWithDb(db=>getTopChannels(db,20,req.query)),
-      appWithDb(db=>getHealth(db,20)),appWithDb(db=>getTimeseries(db,req.query)),
-      appWithDb(getAlerts),appWithDb(getMasters),appWithDb(db=>getHeatmap(db,req.query))
-    ]);
+    const [overview,brands,staff,channels,health,timeseries,alerts,masters,heatmap]=await appWithDb(db=>Promise.all([
+      getOverview(db,req.query),getTopBrands(db,20,req.query),
+      getTopStaff(db,20,req.query),getTopChannels(db,20,req.query),
+      getHealth(db,20),getTimeseries(db,req.query),
+      getAlerts(db),getMasters(db),getHeatmap(db,req.query)
+    ]));
     const data={overview,brands,staff,channels,health,timeseries,alerts,masters,heatmap};
     const elapsedMs = Date.now() - started;
     // Bounded diagnostics only: no query text, credentials, or payload data.

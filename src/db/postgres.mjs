@@ -1,6 +1,7 @@
 import pg from 'pg';
-const { Client } = pg;
-export async function connectDb() {
+const { Client, Pool } = pg;
+
+function connectionConfig() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('Missing DATABASE_URL');
   const config = { connectionString, ssl: connectionString.includes('supabase.com') || process.env.SUPABASE_POOLER_IP ? { rejectUnauthorized: false } : undefined };
@@ -12,9 +13,48 @@ export async function connectDb() {
     config.password = decodeURIComponent(u.password);
     config.database = u.pathname.replace(/^\//, '') || 'postgres';
   }
+  return config;
+}
+
+export async function connectDb() {
+  const config = connectionConfig();
   const client = new Client(config);
   await client.connect();
   return client;
+}
+
+let appPool;
+function getAppPool() {
+  if (appPool) return appPool;
+  appPool = new Pool({
+    ...connectionConfig(),
+    max: Math.max(1, Number(process.env.DB_POOL_MAX || 3)),
+    connectionTimeoutMillis: Math.max(1000, Number(process.env.DB_CONNECT_TIMEOUT_MS || 15000)),
+    idleTimeoutMillis: Math.max(1000, Number(process.env.DB_IDLE_TIMEOUT_MS || 30000)),
+    allowExitOnIdle: true
+  });
+  appPool.on('error', error => console.error(`[database-pool] idle client error: ${error.message}`));
+  return appPool;
+}
+
+// Web requests share a small, bounded pool instead of creating an unbounded
+// burst of authenticated Supavisor sessions. The returned lease preserves the
+// existing query/end contract used throughout the server and job worker.
+export async function connectAppDb() {
+  const client = await getAppPool().connect();
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    client.release();
+  };
+  return new Proxy(client, {
+    get(target, property, receiver) {
+      if (property === 'end') return release;
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }
 export async function runSqlFile(client, filePath) {
   const fs = await import('fs');
