@@ -36,6 +36,7 @@
     "migrate:master-mirror": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/017_master_report_mirror.sql",
     "migrate:repair-reporting-dates": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/018_repair_reporting_dates.sql",
     "migrate:ai-analyst": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/019_ai_analyst_audit.sql",
+    "migrate:reporting-status-index": "node --env-file-if-exists=.env.local scripts/apply-migration.mjs migrations/020_reporting_status_watermark_index.sql",
     "master-mirror:dry-run": "node --env-file-if-exists=.env.local scripts/master-report-mirror.mjs",
     "master-mirror:apply": "node --env-file-if-exists=.env.local scripts/master-report-mirror.mjs --apply",
     "catalog:cutover": "node --env-file-if-exists=.env.local scripts/cutover-catalog-authority.mjs",
