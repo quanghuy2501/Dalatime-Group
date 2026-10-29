@@ -119,6 +119,15 @@ test('scheduled runner never republishes page cache from a failed prior run',asy
   assert.equal(publishedChannel,'Fresh Google Channel');
 });
 
+test('overlapping scheduler tick exits cleanly when another direct run owns the lock',async()=>{
+  let ended=false; let queries=0; const events=[];
+  const db={end:async()=>{ended=true},query:async sql=>{queries++;assert.match(sql,/pg_try_advisory_lock/);return {rows:[{locked:false}]};}};
+  const result=await runDirectNvIngestion({db,log:event=>events.push(event)});
+  assert.deepEqual(result,{status:'skipped',reason:'scheduler-lock-held'});
+  assert.equal(queries,1); assert.equal(ended,false);
+  assert.deepEqual(events.filter(event=>event.event==='final').map(event=>event.status),['skipped']);
+});
+
 test('runner emits page progress, heartbeat, and exactly one published final event',async()=>{
   const one=[sources[0]]; const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nv-output-')); const file=path.join(dir,'registry.json'); fs.writeFileSync(file,JSON.stringify({sources:one}));
   const events=[]; const db={end:async()=>{},query:async sql=>{

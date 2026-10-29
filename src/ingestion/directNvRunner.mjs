@@ -86,7 +86,15 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
   const assertActive=()=>{if(Date.now()-startedAt>=totalTimeoutMs)throw new NvTimeoutError('direct NV total runtime',totalTimeoutMs);};
   try {
     const lockResult=await queued(()=>db.query(`select pg_try_advisory_lock(hashtext('onicorn:direct-nv-run')) locked`));
-    if(lockResult.rows?.[0]?.locked===false)throw new Error('another direct NV run holds the scheduler lock');
+    if(lockResult.rows?.[0]?.locked===false) {
+      // Overlapping scheduler ticks are expected when a healthy run takes
+      // longer than the interval. Treat them as a no-op so Render does not
+      // emit a false failure email for ordinary lock contention.
+      terminal=true;
+      const skipped={status:'skipped',reason:'scheduler-lock-held'};
+      progress({event:'final',...skipped,lastKnownGoodPreserved:true});
+      return skipped;
+    }
     locked=true;
     await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,
       error=coalesce(error,'abandoned after total runtime deadline') where run_type='direct_nv_ingestion' and status='running'
@@ -129,7 +137,7 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       await db.query('commit');
     } catch(error) { await db.query('rollback'); throw error; }
     assertActive();
-    const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now()),diagnostics});
+    const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,Math.min(DB_STATEMENT_TIMEOUT_MS,deadlineAt-Date.now())),diagnostics});
     readModelRefresher ||= publisher===publishNvRows ? refreshReportingReadModel : async()=>({refreshed:false,reason:'custom-publisher'});
     let readModel;
     try {
