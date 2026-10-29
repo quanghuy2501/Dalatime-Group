@@ -96,7 +96,11 @@ const scalar = (field, value) => {
   const result = asNullable(value);
   if (result && result.length > FIELD_LIMIT) throw badRequest(`${field} vượt quá ${FIELD_LIMIT} ký tự`);
   if (field === 'email' && result && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result)) throw badRequest('Email không hợp lệ');
-  if (field === 'url' && result && !/^https?:\/\//i.test(result)) throw badRequest('Link kênh phải bắt đầu bằng http:// hoặc https://');
+  if (field === 'url' && result) {
+    const url = /^www\./i.test(result) ? `https://${result}` : result;
+    if (!/^https?:\/\//i.test(url)) throw badRequest('Link kênh phải bắt đầu bằng www., http:// hoặc https://');
+    return url;
+  }
   return result;
 };
 

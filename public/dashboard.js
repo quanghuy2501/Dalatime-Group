@@ -548,7 +548,9 @@ function fieldControl([field,label,type,required],row) {
   if(type==='textarea') return `<label class="form-field wide"><span>${esc(label)}</span><textarea data-field="${field}" ${req}>${esc(value)}</textarea></label>`;
   if(type==='clients'||type==='staff') return `<label class="form-field"><span>${esc(label)}${required?' *':''}</span><select data-field="${field}" ${req}>${!required?'<option value="">—</option>':''}${formOptions(type,value)}</select></label>`;
   const min=type==='number'?'min="0"':'';
-  return `<label class="form-field"><span>${esc(label)}${required?' *':''}</span><input data-field="${field}" type="${type}" value="${esc(value)}" ${min} ${req}></label>`;
+  const inputType=type==='url'?'text':type;
+  const inputMode=type==='url'?'inputmode="url"':'';
+  return `<label class="form-field"><span>${esc(label)}${required?' *':''}</span><input data-field="${field}" type="${inputType}" value="${esc(value)}" ${inputMode} ${min} ${req}></label>`;
 }
 
 function openCatalogForm(row=null) {

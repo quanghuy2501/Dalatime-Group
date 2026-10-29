@@ -17,6 +17,13 @@ test('catalog validation rejects unknown fields and malformed business values', 
   assert.throws(()=>validateCatalogPayload('channels',{name:'A',follower:-1}),/không âm/);
 });
 
+test('channel links entered with www are stored as HTTPS URLs', () => {
+  const row=validateCatalogPayload('channels',{name:'Con guộc Dalat',url:'www.tiktok.com/@amiasfcpj9e'});
+  assert.equal(row.url,'https://www.tiktok.com/@amiasfcpj9e');
+  assert.equal(validateCatalogPayload('channels',{name:'Đạt Là - Dalat',url:'https://www.tiktok.com/@zandryeca3c'}).url,'https://www.tiktok.com/@zandryeca3c');
+  assert.throws(()=>validateCatalogPayload('channels',{name:'A',url:'not-a-url'}),/Link kênh/);
+});
+
 test('client create is transactional, audited and never deletes business data', async () => {
   const calls=[];
   const db={query:async(sql,params)=>{
