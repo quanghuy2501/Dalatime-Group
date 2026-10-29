@@ -57,6 +57,21 @@ export function planPublicationDelta(rows, existingRows, freshSourceIds) {
   return {changedRows,removedKeys,affectedBrandKeys:[...new Set([...removedKeys,...changedRows.map(row=>row.row_key)])]};
 }
 
+// Staging is a publication checkpoint, not an archive. Keep the latest three
+// committed snapshots (including partial runs that preserved failed sources)
+// so scheduled full-sheet reads cannot grow this table without bound.
+export async function pruneNvStaging(db, {keepRuns=3,statementTimeoutMs=30000}={}) {
+  await db.query('begin');
+  try {
+    await db.query(`select set_config('statement_timeout',$1,true)`,[String(statementTimeoutMs)]);
+    const result=await db.query(`delete from nv_posts_staging where run_id not in (
+      select id from sync_runs where run_type='direct_nv_ingestion' and status in ('ok','partial')
+      order by started_at desc,id desc limit $1)`,[keepRuns]);
+    await db.query('commit');
+    return {deleted:result.rowCount||0,keptRuns:keepRuns};
+  } catch(error) { await db.query('rollback'); throw error; }
+}
+
 export async function publishNvRows(db, runId, configVersion, rows, sourceCount, {statementTimeoutMs=120000,diagnostics={}}={}) {
   const fingerprint=crypto.createHash('sha256').update(rows.map(r=>`${r.row_key}:${r.source_hash}`).sort().join('\n')).digest('hex');
   await db.query('begin');
@@ -169,8 +184,16 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       readModel={refreshed:false,reason:'refresh-failed',error:String(error.message).slice(0,500)};
       await db.query(`update sync_runs set meta=meta||$2::jsonb where id=$1`,[runId,json({read_model:readModel})]).catch(()=>{});
     }
-    terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result,readModel});
-    return {...result,readModel};
+    let stagingPrune;
+    if(publisher===publishNvRows) {
+      try { stagingPrune=await pruneNvStaging(db); }
+      catch(error) {
+        stagingPrune={deleted:0,error:String(error.message).slice(0,500)};
+        progress({event:'maintenance_warning',operation:'prune_nv_staging',error:stagingPrune.error});
+      }
+    }
+    terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result,readModel,stagingPrune});
+    return {...result,readModel,stagingPrune};
   } catch(error) {
     if(runId) await queued(()=>db.query(`update sync_runs set status='fail',finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,error=$2 where id=$1`,[runId,String(error.message).slice(0,2000)])).catch(()=>{});
     terminal=true; progress({event:'final',status:'blocked',error:String(error.message),lastKnownGoodPreserved:true});
