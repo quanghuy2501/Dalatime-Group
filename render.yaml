@@ -82,6 +82,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: DB_USE_SESSION_POOLER
+        value: "1"
       - key: REPORT_REGISTRY_ENCRYPTION_KEY
         sync: false
       - key: REPORT_REGISTRY_PRODUCTION
@@ -103,6 +105,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: DB_USE_SESSION_POOLER
+        value: "1"
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID
@@ -142,6 +146,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: DB_USE_SESSION_POOLER
+        value: "1"
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: REPORT_REGISTRY_ENCRYPTION_KEY
@@ -165,6 +171,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: DB_USE_SESSION_POOLER
+        value: "1"
       - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
         sync: false
       - key: MASTER_SPREADSHEET_ID

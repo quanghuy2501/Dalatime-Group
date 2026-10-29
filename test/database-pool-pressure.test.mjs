@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/server.mjs';
+import { normalizeDatabaseUrl } from '../src/db/postgres.mjs';
+
+test('scheduled jobs switch Supabase transaction pooler to session mode only when requested',()=>{
+  const transaction='postgresql://user:secret@aws-0-region.pooler.supabase.com:6543/postgres';
+  assert.equal(normalizeDatabaseUrl(transaction),transaction);
+  assert.equal(normalizeDatabaseUrl(transaction,{sessionPooler:true}),'postgresql://user:secret@aws-0-region.pooler.supabase.com:5432/postgres');
+  const unrelated='postgresql://localhost:6543/postgres';
+  assert.equal(normalizeDatabaseUrl(unrelated,{sessionPooler:true}),unrelated);
+});
 
 test('dashboard uses one database lease for the complete payload', async t => {
   const keys = ['NODE_ENV', 'DASHBOARD_BASIC_USER', 'DASHBOARD_BASIC_PASS', 'AUTH_SESSION_SECRET'];

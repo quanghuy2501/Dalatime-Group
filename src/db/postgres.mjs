@@ -1,8 +1,15 @@
 import pg from 'pg';
 const { Client, Pool } = pg;
 
+export function normalizeDatabaseUrl(connectionString, { sessionPooler=false }={}) {
+  if (!connectionString || !sessionPooler) return connectionString;
+  const url=new URL(connectionString);
+  if (url.port==='6543' && url.hostname.endsWith('.pooler.supabase.com')) url.port='5432';
+  return url.toString();
+}
+
 function connectionConfig() {
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = normalizeDatabaseUrl(process.env.DATABASE_URL,{sessionPooler:process.env.DB_USE_SESSION_POOLER==='1'});
   if (!connectionString) throw new Error('Missing DATABASE_URL');
   const config = { connectionString, ssl: connectionString.includes('supabase.com') || process.env.SUPABASE_POOLER_IP ? { rejectUnauthorized: false } : undefined };
   if (process.env.SUPABASE_POOLER_IP) {

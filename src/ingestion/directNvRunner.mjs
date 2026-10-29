@@ -74,7 +74,9 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount,
     if(delta.affectedBrandKeys.length)await db.query(`delete from post_brands_sheet where raw_sheet_row_key=any($1::text[])`,[delta.affectedBrandKeys]);
     if(delta.removedKeys.length)await db.query(`delete from posts_raw_sheet where row_key=any($1::text[])`,[delta.removedKeys]);
     await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
-    await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
+    // Every brand row for changed keys was removed above, so a plain insert is
+    // both safe and much cheaper than conflict-updating every brand metric.
+    await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{plainInsert:true,maxParams:DB_WRITE_MAX_PARAMS});
     const counts=(await db.query(`select
       (select count(*) from nv_posts_staging s join posts_raw_sheet p on p.row_key=s.row_key
         and p.source_hash=s.source_hash and p.source_file_id=s.source_file_id where s.run_id=$1)::int published,
