@@ -43,8 +43,21 @@ function brandRows(rows, runId) {
     realtime_share:mapped_row.realtime_share, viral_label:mapped_row.viral_label, bonus_amount:mapped_row.bonus_amount, published_run_id:runId })));
 }
 
+export function planPublicationDelta(rows, existingRows, freshSourceIds) {
+  const desiredKeys=new Set(rows.map(row=>row.row_key));
+  const freshIds=new Set(freshSourceIds);
+  const existingByKey=new Map(existingRows.map(row=>[row.row_key,row]));
+  const changedRows=rows.filter(row=>{
+    const existing=existingByKey.get(row.row_key);
+    return !existing || existing.source_hash!==row.source_hash || existing.source_file_id!==row.source_file_id;
+  });
+  const removedKeys=existingRows
+    .filter(row=>freshIds.has(row.source_file_id)&&!desiredKeys.has(row.row_key))
+    .map(row=>row.row_key);
+  return {changedRows,removedKeys,affectedBrandKeys:[...new Set([...removedKeys,...changedRows.map(row=>row.row_key)])]};
+}
+
 export async function publishNvRows(db, runId, configVersion, rows, sourceCount, {statementTimeoutMs=120000,diagnostics={}}={}) {
-  const raw=mirrorRows(rows,runId), brands=brandRows(rows,runId);
   const fingerprint=crypto.createHash('sha256').update(rows.map(r=>`${r.row_key}:${r.source_hash}`).sort().join('\n')).digest('hex');
   await db.query('begin');
   try {
@@ -54,13 +67,19 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount,
     if (Number(gate.total)!==sourceCount || Number(gate.terminal)!==sourceCount) throw new Error('source checkpoint gate failed');
     const freshSourceIds=diagnostics.fresh_source_ids||[];
     if (!freshSourceIds.length) throw new Error('no readable NV sources; last-known-good publication preserved');
-    await db.query(`delete from post_brands_sheet b using posts_raw_sheet p where b.raw_sheet_row_key=p.row_key and p.source_file_id=any($1::text[])`,[freshSourceIds]);
-    await db.query(`delete from posts_raw_sheet where source_file_id=any($1::text[])`,[freshSourceIds]);
+    const existing=(await db.query(`select row_key,source_hash,source_file_id from posts_raw_sheet
+      where source_file_id=any($1::text[]) or row_key=any($2::text[])`,[freshSourceIds,rows.map(row=>row.row_key)])).rows;
+    const delta=planPublicationDelta(rows,existing,freshSourceIds);
+    const raw=mirrorRows(delta.changedRows,runId), brands=brandRows(delta.changedRows,runId);
+    if(delta.affectedBrandKeys.length)await db.query(`delete from post_brands_sheet where raw_sheet_row_key=any($1::text[])`,[delta.affectedBrandKeys]);
+    if(delta.removedKeys.length)await db.query(`delete from posts_raw_sheet where row_key=any($1::text[])`,[delta.removedKeys]);
     await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
     await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
-    const counts=(await db.query(`select (select count(*) from posts_raw_sheet where published_run_id=$1)::int raw,
+    const counts=(await db.query(`select
+      (select count(*) from nv_posts_staging s join posts_raw_sheet p on p.row_key=s.row_key
+        and p.source_hash=s.source_hash and p.source_file_id=s.source_file_id where s.run_id=$1)::int published,
       (select count(*) from posts_raw_sheet)::int total,(select count(*) from nv_posts_staging where run_id=$1)::int staged`,[runId])).rows[0];
-    if (Number(counts.raw)!==rows.length || Number(counts.staged)!==rows.length) throw new Error('in-transaction publication parity failed');
+    if (Number(counts.published)!==rows.length || Number(counts.staged)!==rows.length) throw new Error('in-transaction publication parity failed');
     await db.query(`insert into nv_published_snapshots(singleton,run_id,config_version,row_count,fingerprint) values(true,$1,$2,$3,$4)
       on conflict(singleton) do update set run_id=excluded.run_id,config_version=excluded.config_version,row_count=excluded.row_count,fingerprint=excluded.fingerprint,published_at=now()`,
       [runId,configVersion,Number(counts.total),fingerprint]);
@@ -68,9 +87,9 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount,
     await db.query(`update sync_runs set status=$4,finished_at=now(),duration_ms=extract(epoch from(now()-started_at))*1000,
       rows_read=$2,rows_written=$2,files_total=$3,files_ok=$5,files_fail=$8,error=$6,meta=meta||$7::jsonb where id=$1`,
       [runId,rows.length,sourceCount,runStatus,sourceCount-(diagnostics.failed||0),diagnostics.failed?json(diagnostics.errors):null,
-        json({partial:Boolean(diagnostics.failed),errors:diagnostics.errors||[],freshness:{fresh_source_ids:freshSourceIds,last_known_good_source_ids:(diagnostics.failed_sources||[]).map(x=>x.google_file_id)}}),diagnostics.failed||0]);
+        json({partial:Boolean(diagnostics.failed),errors:diagnostics.errors||[],publication:{changed:delta.changedRows.length,removed:delta.removedKeys.length,unchanged:rows.length-delta.changedRows.length},freshness:{fresh_source_ids:freshSourceIds,last_known_good_source_ids:(diagnostics.failed_sources||[]).map(x=>x.google_file_id)}}),diagnostics.failed||0]);
     await db.query('commit');
-    return {runId,status:runStatus,rows:rows.length,totalRows:Number(counts.total),brands:brands.length,fingerprint,configVersion,diagnostics};
+    return {runId,status:runStatus,rows:rows.length,totalRows:Number(counts.total),brands:brands.length,fingerprint,configVersion,diagnostics,publication:{changed:delta.changedRows.length,removed:delta.removedKeys.length,unchanged:rows.length-delta.changedRows.length}};
   } catch (error) { await db.query('rollback'); throw error; }
 }
 
@@ -133,7 +152,7 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
       // making progress, starving the web API behind the same pooler.
       const writeTimeoutMs=Math.max(1,Math.min(DB_STATEMENT_TIMEOUT_MS,deadlineAt-Date.now()));
       await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.floor(writeTimeoutMs))]);
-      await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,maxParams:DB_WRITE_MAX_PARAMS});
+      await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,plainInsert:true,maxParams:DB_WRITE_MAX_PARAMS});
       await db.query('commit');
     } catch(error) { await db.query('rollback'); throw error; }
     assertActive();

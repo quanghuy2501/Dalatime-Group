@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GoogleApi } from '../src/google/googleApi.mjs';
 import { COLUMN_MAPPING, collectNvRows, discoverSources, normalizeNvRow, readSource, resolveHeader } from '../src/ingestion/directNv.mjs';
-import { runDirectNvIngestion } from '../src/ingestion/directNvRunner.mjs';
+import { planPublicationDelta, runDirectNvIngestion } from '../src/ingestion/directNvRunner.mjs';
 
 const header=COLUMN_MAPPING.map(x=>x[0]);
 const data=i=>['2026-09-01',`Brand ${i}`,`Channel ${i}`,`https://example.com/post/${i}`,`Employee ${i}`,'Không','',100+i,10,2,1,3,90,9,1,1,2,0.17,'Đã đăng',0,'Có','2026-09-02'];
@@ -63,6 +63,26 @@ test('exact 22-column mapping and stable idempotency key',()=>{
   assert.throws(()=>resolveHeader([...header.slice(0,21),'WRONG']),/mapping mismatch/);
   const a=normalizeNvRow(data(1),sources[0],2,'master-v1'); const b=normalizeNvRow(data(1),sources[0],2,'master-v1');
   assert.equal(a.row_key,b.row_key); assert.equal(a.mapped_row.config_version,'master-v1'); assert.deepEqual(a.mapped_row.raw_values,data(1));
+});
+
+test('publication delta preserves unchanged rows and touches only changed, new, or removed keys',()=>{
+  const rows=[
+    {row_key:'same',source_hash:'h1',source_file_id:'fresh-a'},
+    {row_key:'changed',source_hash:'h2-new',source_file_id:'fresh-a'},
+    {row_key:'new',source_hash:'h3',source_file_id:'fresh-a'},
+    {row_key:'moved',source_hash:'h4',source_file_id:'fresh-a'}
+  ];
+  const existing=[
+    {row_key:'same',source_hash:'h1',source_file_id:'fresh-a'},
+    {row_key:'changed',source_hash:'h2-old',source_file_id:'fresh-a'},
+    {row_key:'removed',source_hash:'old',source_file_id:'fresh-a'},
+    {row_key:'moved',source_hash:'h4',source_file_id:'failed-source'},
+    {row_key:'preserved',source_hash:'old',source_file_id:'failed-source'}
+  ];
+  const delta=planPublicationDelta(rows,existing,['fresh-a']);
+  assert.deepEqual(delta.changedRows.map(row=>row.row_key),['changed','new','moved']);
+  assert.deepEqual(delta.removedKeys,['removed']);
+  assert.deepEqual(new Set(delta.affectedBrandKeys),new Set(['changed','new','moved','removed']));
 });
 
 test('rejects an out-of-range Google serial date before database publication',()=>{
