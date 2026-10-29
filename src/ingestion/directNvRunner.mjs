@@ -4,6 +4,8 @@ import { COLUMN_MAPPING, NvTimeoutError, collectNvRows, createReadonlyApi, disco
 import { refreshReportingReadModel } from '../reporting/readModel.mjs';
 
 const json = value => JSON.stringify(value);
+const DB_WRITE_MAX_PARAMS = 5000;
+const DB_STATEMENT_TIMEOUT_MS = 120000;
 
 async function activeConfig(db) {
   const result = await db.query(`select c.version,c.mapping from nv_config_versions c join sync_runs r on r.id=c.master_sync_run_id
@@ -54,8 +56,8 @@ export async function publishNvRows(db, runId, configVersion, rows, sourceCount,
     if (!freshSourceIds.length) throw new Error('no readable NV sources; last-known-good publication preserved');
     await db.query(`delete from post_brands_sheet b using posts_raw_sheet p where b.raw_sheet_row_key=p.row_key and p.source_file_id=any($1::text[])`,[freshSourceIds]);
     await db.query(`delete from posts_raw_sheet where source_file_id=any($1::text[])`,[freshSourceIds]);
-    await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:30000});
-    await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{maxParams:30000});
+    await upsert(db,'posts_raw_sheet',raw,['row_key'],Object.keys(raw[0]||{}).filter(k=>!['row_key'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
+    await upsert(db,'post_brands_sheet',brands,['raw_sheet_row_key','brand_name'],Object.keys(brands[0]||{}).filter(k=>!['raw_sheet_row_key','brand_name'].includes(k)),{maxParams:DB_WRITE_MAX_PARAMS});
     const counts=(await db.query(`select (select count(*) from posts_raw_sheet where published_run_id=$1)::int raw,
       (select count(*) from posts_raw_sheet)::int total,(select count(*) from nv_posts_staging where run_id=$1)::int staged`,[runId])).rows[0];
     if (Number(counts.raw)!==rows.length || Number(counts.staged)!==rows.length) throw new Error('in-transaction publication parity failed');
@@ -118,8 +120,12 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
     await db.query(`update sync_runs set meta=meta || $2::jsonb where id=$1`, [runId, json({source_counts:{successful:diagnostics.successful,empty:diagnostics.empty,failed:diagnostics.failed,total:diagnostics.total},errors:diagnostics.errors})]);
     await db.query('begin');
     try {
-      await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.max(1,Math.floor(deadlineAt-Date.now())))]);
-      await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,maxParams:30000});
+      // Keep each write bounded. Very large parameter payloads can monopolize
+      // Supabase transaction-pooler connections even while the query is still
+      // making progress, starving the web API behind the same pooler.
+      const writeTimeoutMs=Math.max(1,Math.min(DB_STATEMENT_TIMEOUT_MS,deadlineAt-Date.now()));
+      await db.query(`select set_config('statement_timeout',$1,true)`,[String(Math.floor(writeTimeoutMs))]);
+      await upsert(db,'nv_posts_staging',rows.map(r=>({...r,run_id:runId,mapped_row:json(r.mapped_row)})),['run_id','row_key'],['source_hash'],{noUpdatedAt:true,maxParams:DB_WRITE_MAX_PARAMS});
       await db.query('commit');
     } catch(error) { await db.query('rollback'); throw error; }
     assertActive();
