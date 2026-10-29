@@ -90,7 +90,9 @@ test('full pipeline maps to all four actions in safe order and publishes the Mas
   const db = { query: async () => { sequence.push('report'); return { rows: [{}] }; } };
   try {
     await runner('full_pipeline', { db, log: async () => {} });
-    assert.deepEqual(sequence, ['config', 'nv', 'report', 'report', 'master:master-copy-id:true']);
+    assert.deepEqual(sequence.slice(0, 2), ['config', 'nv']);
+    assert.equal(sequence.at(-1), 'master:master-copy-id:true');
+    assert.ok(sequence.slice(2, -1).every(step => step === 'report'));
   } finally {
     for (const [key,value] of Object.entries(previous)) value === undefined ? delete process.env[key] : process.env[key] = value;
   }

@@ -125,8 +125,15 @@ export async function runDirectNvIngestion({ db,api,registryFile,concurrency=Num
     assertActive();
     const result=await publisher(db,runId,config.version,rows,sources.length,{statementTimeoutMs:Math.max(1,deadlineAt-Date.now()),diagnostics});
     readModelRefresher ||= publisher===publishNvRows ? refreshReportingReadModel : async()=>({refreshed:false,reason:'custom-publisher'});
-    const readModel=await readModelRefresher(db);
-    assertActive();
+    let readModel;
+    try {
+      readModel=await readModelRefresher(db,{statementTimeoutMs:Math.max(1000,Math.min(120000,deadlineAt-Date.now())),lockTimeoutMs:30000});
+    } catch(error) {
+      // Publication is already committed and authoritative. Preserve that
+      // successful ingestion result and let the next bounded refresh retry.
+      readModel={refreshed:false,reason:'refresh-failed',error:String(error.message).slice(0,500)};
+      await db.query(`update sync_runs set meta=meta||$2::jsonb where id=$1`,[runId,json({read_model:readModel})]).catch(()=>{});
+    }
     terminal=true; progress({event:'final',status:diagnostics.failed?'partial':'published',lastKnownGoodPreserved:Boolean(diagnostics.failed),...result,readModel});
     return {...result,readModel};
   } catch(error) {

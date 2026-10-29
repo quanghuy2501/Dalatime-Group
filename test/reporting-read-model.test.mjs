@@ -29,11 +29,11 @@ test('public database lock revokes Supabase API roles and enables RLS without bu
   assert.doesNotMatch(security,/\b(update|delete from|truncate table|insert into)\s+(clients|brands|staff|channels|posts_raw_sheet|post_brands_sheet)\b/i);
 });
 
-test('read-model refresh is singleton, concurrent and returns parity metadata',async()=>{
+test('read-model refresh is transaction-pool safe, bounded and returns parity metadata',async()=>{
   const calls=[];
   const db={query:async(sql)=>{
     calls.push(sql);
-    if(sql.includes('pg_try_advisory_lock'))return {rows:[{locked:true}]};
+    if(sql.includes('pg_try_advisory_xact_lock'))return {rows:[{locked:true}]};
     if(sql.includes('source_rows'))return {rows:[{source_rows:10,canonical_rows:7,future_rows:1,invalid_date_rows:1,duplicate_source_rows:3}]};
     return {rows:[{}]};
   }};
@@ -41,6 +41,9 @@ test('read-model refresh is singleton, concurrent and returns parity metadata',a
   assert.equal(result.refreshed,true);
   assert.equal(result.canonical_rows,7);
   assert.equal(result.invalid_date_rows,1);
-  assert.ok(calls.some(sql=>sql.includes('refresh materialized view concurrently reporting_posts_canonical')));
-  assert.ok(calls.some(sql=>sql.includes('pg_advisory_unlock')));
+  assert.ok(calls.some(sql=>sql==='begin'));
+  assert.ok(calls.some(sql=>sql.includes("set_config('statement_timeout'")));
+  assert.ok(calls.some(sql=>sql.includes('refresh materialized view reporting_posts_canonical')));
+  assert.ok(calls.some(sql=>sql==='commit'));
+  assert.ok(calls.every(sql=>!sql.includes('pg_try_advisory_lock(')));
 });

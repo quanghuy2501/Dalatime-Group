@@ -10,14 +10,22 @@ export async function reportingReadModelSummary(db) {
     (select max(updated_at) from reporting_posts_canonical) source_watermark`)).rows[0];
 }
 
-export async function refreshReportingReadModel(db) {
-  const acquired = Boolean((await db.query(`select pg_try_advisory_lock(hashtext($1)) locked`, [READ_MODEL_LOCK])).rows[0]?.locked);
-  if (!acquired) return { refreshed: false, reason: 'refresh-already-running' };
+export async function refreshReportingReadModel(db, { statementTimeoutMs=120000, lockTimeoutMs=30000 }={}) {
   const started = Date.now();
+  await db.query('begin');
   try {
-    await db.query('refresh materialized view concurrently reporting_posts_canonical');
-    return { refreshed: true, durationMs: Date.now()-started, ...(await reportingReadModelSummary(db)) };
-  } finally {
-    await db.query(`select pg_advisory_unlock(hashtext($1))`, [READ_MODEL_LOCK]).catch(()=>{});
+    await db.query(`select set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true)`, [String(Math.max(1000,statementTimeoutMs)),String(Math.max(1000,lockTimeoutMs))]);
+    const acquired = Boolean((await db.query(`select pg_try_advisory_xact_lock(hashtext($1)) locked`, [READ_MODEL_LOCK])).rows[0]?.locked);
+    if (!acquired) { await db.query('rollback'); return { refreshed: false, reason: 'refresh-already-running' }; }
+    // Transaction-pool safe: the xact lock and refresh stay on one backend.
+    // The bounded non-concurrent refresh avoids leaked session advisory locks
+    // and unbounded concurrent refreshes on Supavisor transaction mode.
+    await db.query('refresh materialized view reporting_posts_canonical');
+    const summary = await reportingReadModelSummary(db);
+    await db.query('commit');
+    return { refreshed: true, durationMs: Date.now()-started, ...summary };
+  } catch (error) {
+    await db.query('rollback').catch(()=>{});
+    throw error;
   }
 }
