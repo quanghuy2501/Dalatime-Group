@@ -41,10 +41,9 @@ app.get('/healthz', (req, res) => res.json({
   features: { masterCatalogSync: true, webCatalogAdmin: true, databaseCatalogAuthority: Boolean(app.locals.databaseCatalogAuthority), boundedSheetDates: true }
 }));
 app.get('/readyz', asyncRoute(async (req, res) => {
-  // Temporary deployment recovery: the previous release exhausted Supavisor
-  // while Railway gated replacement on this endpoint. A follow-up commit
-  // restores the database probe after the bounded-pool release is active.
-  res.json({ ok: true, ready: true, recoveryMode: true });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ ok: false, ready: false, reason: 'DATABASE_URL missing' });
+  try { await appWithDb(async db => db.query('select 1')); res.json({ ok: true, ready: true }); }
+  catch { res.status(503).json({ ok: false, ready: false, reason: 'database unavailable' }); }
 }));
 const appWithDb = async fn => {
   const db = await dbConnector();
